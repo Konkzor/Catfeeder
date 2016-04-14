@@ -25,12 +25,13 @@ typedef struct{
 #define DS1307_ADDRESS 0x68
 
 // WIFI
-SoftwareSerial ESP8266(10, 11);
 #define IProuter "192.168.1.254"
 #define IPthingspeak "api.thingspeak.com" //"184.106.153.149"
-String NomduReseauWifi =  "Bbox-SandyEtMat";
+String NomduReseauWifi = "Bbox-SandyEtMat";
 String MotDePasse = "576CC166AEC4AF5CA513334FEF7DD2";
-String GET = "GET /update?api_key=NGTY83K2SUDWS25H&field1=";
+String GET = "GET /update?api_key=V5SYYI8KDAHKK5AX&field1=";
+
+SoftwareSerial ESP8266(10, 11);
 
 // Feeder
 #define timeForOneTurn 2000 // ms
@@ -58,7 +59,7 @@ LiquidCrystal lcd(8, 7, 6, 5, 4, 3);
 
 // Variables
 short wifiState = 0;
-bool flag_feed = false;
+bool flag_feed = true;
 short weightPerDay = 0;
 short timeleft = 0;
 Date date_t;
@@ -107,12 +108,18 @@ void setup() {
   delay(2000);
 
   //RTC synchronization
-  getNetworkTime(&date_t);
+  if(wifiState == 1){
+    short state = getNetworkTime(&date_t);
+    if (state == 1) writeToRTC(&date_t);
+  }
+  else readFromRTC(&date_t);
+  
   next_date_s.date = date_t;
   next_date_s.nbrev = 3;
   setupFeeder();
-  //writeToRTC(&date);
   
+  delay(1000);
+  printMainPage();
   delay(1000);
   // Timer setup
   timerId_time = timer.setInterval(60000, ISR_time); // Every 1 min
@@ -149,10 +156,7 @@ void loop() {
     // Send new value through WiFi
     weightPerDay+=weightPerFeed;
     if (wifiState == 0) wifiState = connect2Wifi(); // Try to reconnect
-    String cmd = GET;
-    cmd += weightPerDay;
-    cmd += "\r\n";
-    sendTCPRequest(IPthingspeak, cmd);
+    send2TP(String(weightPerDay));
     
     updateMeals(&next_date_s);
     if (next_date_s.date.heures == date2feed[0].date.heures && next_date_s.date.minutes == date2feed[0].date.minutes){ // If next meal to serve is the breakfast
@@ -160,7 +164,7 @@ void loop() {
     }
     
     printMainPage();
-    
+
     flag_feed = false;
     timer.enable(timerId_time);
     timer.enable(timerId_sec);
@@ -209,7 +213,7 @@ void ISR_time(void){
   // Check if Wi-Fi is available
   //wifiState = checkWiFi(); PROBLEMS
   // Update Time
-  //readFromRTC(&current_date);
+  readFromRTC(&date_t);
 
   // Print on display
   printMainPage();
@@ -240,26 +244,13 @@ void feedTheCat(const short revolutions){
  *                              WIFI FUNCTIONS                                *
  ******************************************************************************/
 short connect2Wifi(void){
-  Serial.println("**********************************************************");
-  Serial.println("**************** DEBUT DE L'INITIALISATION ***************");
-  Serial.println("**********************************************************");
-  Serial.println("WORKING ?");
-  envoieAuESP8266("AT");//+RST");
-  Serial.println(recoitDuESP8266(2000));
-  Serial.println("**********************************************************");
-  Serial.println("WIFI MODE (STATION)");
-  envoieAuESP8266("AT+CWMODE=1");
-  Serial.println(recoitDuESP8266(7000));
-  Serial.println("**********************************************************");
-  Serial.println("JOIN ACCESS POINT");
-  envoieAuESP8266("AT+CWJAP=\"" + NomduReseauWifi + "\",\"" + MotDePasse + "\"");
-  String res = recoitDuESP8266(10000);
-  Serial.println(res);
-  Serial.println("**********************************************************");
-  Serial.println("***************** INITIALISATION TERMINEE ****************");
-  Serial.println("**********************************************************");
-  Serial.println("");
-
+  envoieAuESP8266("AT");//+RST"); // WORKING ?
+  Serial.print(recoitDuESP8266(2000));
+  envoieAuESP8266("AT+CWMODE=1"); // WIFI MODE STATION
+  Serial.print(recoitDuESP8266(7000));
+  envoieAuESP8266("AT+CWJAP=\"" + NomduReseauWifi + "\",\"" + MotDePasse + "\""); // JOIN ACCESS POINT
+  String res = recoitDuESP8266(5000);
+  Serial.print(res);
   if (res.indexOf("WIFI GOT IP") != -1) return 1;
   else return 0;
 }
@@ -299,7 +290,7 @@ void sendDebug(String cmd){
   ESP8266.println(cmd);
 }
 
-void getNetworkTime(Date* date){
+short getNetworkTime(Date* date){
   // Send served food during the day
   // Start session
   String cmd = "AT+CIPSTART=\"TCP\",\"";
@@ -309,7 +300,7 @@ void getNetworkTime(Date* date){
   delay(2000);
   if(ESP8266.find("Error")){
     Serial.print("RECEIVED: Error");
-    return;
+    return 0;
   }
   cmd = "GET /index.html HTTP/1.1\r\n\r\n";
   ESP8266.print("AT+CIPSEND=");
@@ -320,6 +311,7 @@ void getNetworkTime(Date* date){
     ESP8266.print(cmd);
   }else{
     sendDebug("AT+CIPCLOSE");
+    return 0;
   }
 
   char date_string[31];
@@ -337,7 +329,7 @@ void getNetworkTime(Date* date){
       else i--;  //if not, keep going round loop until we've got all the characters
     }
   }
-  else return;
+  else return 0;
   
   // Close session
   sendDebug("AT+CIPCLOSE");
@@ -347,7 +339,6 @@ void getNetworkTime(Date* date){
   char month[4];
   int day, years, hours, minutes, seconds;
   sscanf (date_string,"%3s%*1s %d %3s %4d %d:%d:%d",dayweek,&day, month, &years, &hours, &minutes, &seconds);
-  Serial.println(month);
   date->secondes = seconds;
   date->minutes = minutes;
   date->heures = (hours+2)%24; // GMT + 2
@@ -376,7 +367,7 @@ void getNetworkTime(Date* date){
   else if(strncmp(month,"Dec",3) == 0) date->mois=12;
   date->annee = years%2000;
 
-  Serial.print("Sec :");
+  /*Serial.print("Sec :");
   Serial.println(date->secondes);
   Serial.print("Min :");
   Serial.println(date->minutes);
@@ -387,15 +378,16 @@ void getNetworkTime(Date* date){
   Serial.print("Month :");
   Serial.println(date->mois);
   Serial.print("Year :");
-  Serial.println(date->annee);
-  return;
+  Serial.println(date->annee);*/
+  
+  return 1;
 }
 
-short sendTCPRequest(String ip_host, String command){
+short send2TP(String value){
   // Send served food during the day
   // Start session
   String cmd = "AT+CIPSTART=\"TCP\",\"";
-  cmd += ip_host;
+  cmd += IPthingspeak;
   cmd += "\",80";
   sendDebug(cmd);
   delay(2000);
@@ -403,7 +395,9 @@ short sendTCPRequest(String ip_host, String command){
     Serial.print("RECEIVED: Error");
     return 0;
   }
-  cmd = command;
+  cmd = GET;
+  cmd += value;
+  cmd += "\r\n";
   ESP8266.print("AT+CIPSEND=");
   ESP8266.println(cmd.length());
   if(ESP8266.find(">")){
@@ -464,7 +458,7 @@ void printDateAndHour(Date *date) {
 void printTime2Eat(void){
   lcd.clear();
   lcd.setCursor(1,1);
-  lcd.print("IT'S TIME TO EAT !!");
+  lcd.print("IT'S TIME TO EAT !");
 }
 
 void blinkColon(void){
