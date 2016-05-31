@@ -357,7 +357,7 @@ short getNetworkTime(Date* date){
   else if(strncmp(month,"Feb",3) == 0) date->mois=2;
   else if(strncmp(month,"Mar",3) == 0) date->mois=3;
   else if(strncmp(month,"Apr",3) == 0) date->mois=4;
-  else if(strncmp(month,"Mai",3) == 0) date->mois=5;
+  else if(strncmp(month,"May",3) == 0) date->mois=5;
   else if(strncmp(month,"Jun",3) == 0) date->mois=6;
   else if(strncmp(month,"Jul",3) == 0) date->mois=7;
   else if(strncmp(month,"Aug",3) == 0) date->mois=8;
