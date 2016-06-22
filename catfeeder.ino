@@ -213,6 +213,7 @@ void ISR_time(void){
   // Check if Wi-Fi is available
   //wifiState = checkWiFi(); PROBLEMS
   // Update Time
+  //wifiState = getNetworkTime(&date_t);
   readFromRTC(&date_t);
 
   // Print on display
