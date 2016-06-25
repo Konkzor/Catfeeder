@@ -200,6 +200,8 @@ void updateMeals(Date_s* date_s){
 }
 
 void ISR_feed(void){
+  next_date_s.date = date_t;
+  next_date_s.nbrev = 3;
   flag_feed = true;
 }
 /* ISR_time is called every 1 min */
