@@ -16,10 +16,10 @@ typedef struct{
 }Date;
 
 typedef struct{
-  Date date;
-  bool state; // 1 is done
-  short nbrev; // revolution
-}Date_s;
+  short heures;
+  short minutes;
+  short nb_rev;
+}Meal;
 
 // RTC
 #define DS1307_ADDRESS 0x68
@@ -36,12 +36,14 @@ SoftwareSerial ESP8266(10, 11);
 // Feeder
 #define timeForOneTurn 2000 // ms
 #define weightPerFeed 20 // g
-Date_s date2feed[4];
+Meal meals[4];
+short nextmeal = 0;
+//Date_s date2feed[4];
 int nb_meals = 4;
-// Breakfast at 7H
-// Lunch at 11H30
-// Break at 17H
-// Dinner at 21H
+// Breakfast (0) at 7H
+// Lunch (1) at 11H30
+// Break (2) at 17H
+// Dinner (3) at 21H
 
 // Timer
 SimpleTimer timer;
@@ -63,7 +65,6 @@ bool flag_feed = true;
 short weightPerDay = 0;
 short timeleft = 0;
 Date date_t;
-Date_s next_date_s;
 
 void setup() {
   // ESP8266 baudrate setup
@@ -114,8 +115,6 @@ void setup() {
   }
   else readFromRTC(&date_t);
   
-  next_date_s.date = date_t;
-  next_date_s.nbrev = 3;
   setupFeeder();
   
   delay(1000);
@@ -128,18 +127,18 @@ void setup() {
 
 void setupFeeder(void){
   // Time setups
-  date2feed[0].date.heures = 7;
-  date2feed[0].date.minutes = 0;
-  date2feed[0].nbrev = 3;
-  date2feed[1].date.heures = 11;
-  date2feed[1].date.minutes = 30;
-  date2feed[1].nbrev = 2;
-  date2feed[2].date.heures = 17;
-  date2feed[2].date.minutes = 0;
-  date2feed[2].nbrev = 2;
-  date2feed[3].date.heures = 21;
-  date2feed[3].date.minutes = 0;
-  date2feed[3].nbrev = 2;
+  meals[0].heures = 7;
+  meals[0].minutes = 0;
+  meals[0].nb_rev = 3;
+  meals[1].heures = 11;
+  meals[1].minutes = 30;
+  meals[1].nb_rev = 2;
+  meals[2].heures = 17;
+  meals[2].minutes = 0;
+  meals[2].nb_rev = 2;
+  meals[3].heures = 21;
+  meals[3].minutes = 0;
+  meals[3].nb_rev = 3;
 }
 
 void loop() {
@@ -150,7 +149,7 @@ void loop() {
     // Feed the cat
     printTime2Eat();
     digitalWrite(ledGreenPin, HIGH);
-    feedTheCat(next_date_s.nbrev);
+    feedTheCat(meals[nextmeal].nb_rev);
     digitalWrite(ledGreenPin, LOW);
     
     // Send new value through WiFi
@@ -158,11 +157,12 @@ void loop() {
     if (wifiState == 0) wifiState = connect2Wifi(); // Try to reconnect
     send2TP(String(weightPerDay));
     
-    updateMeals(&next_date_s);
-    if (next_date_s.date.heures == date2feed[0].date.heures && next_date_s.date.minutes == date2feed[0].date.minutes){ // If next meal to serve is the breakfast
+    findNextMeal();
+    if (nextmeal == 0){ // If next meal to serve is the breakfast
       weightPerDay = 0;
     }
-    
+
+    updateTimeLeft(); // To be sure timeleft has been computed
     printMainPage();
 
     flag_feed = false;
@@ -173,50 +173,36 @@ void loop() {
   timer.run();
 }
 
-void updateMeals(Date_s* date_s){
+void findNextMeal(){
   // State setup
   for(int i = 0 ; i < nb_meals ; i++){
-    if(60*date_s->date.heures+date_s->date.minutes >= 60*date2feed[i].date.heures + date2feed[i].date.minutes){ // Meal is past
-      date2feed[i].state = 1; // Served !
-      timeleft = 0;
-    }
-    else{
-      date2feed[i].state = 0;
-      timeleft = (date2feed[i].date.heures - date_s->date.heures)*60 + (date2feed[i].date.minutes - date_s->date.minutes);
-      *date_s = date2feed[i]; // For next time
+    if(60*date_t.heures+date_t.minutes <= 60*meals[i].heures + meals[i].minutes){ // Meal is past
+      nextmeal = i;
       break;
     }
-  }
-
-  // If all meal are served, then reload all of them and set next meal as breakfast
-  if (timeleft == 0){
-    for(int i = 0 ; i < nb_meals ; i++){
-       date2feed[i].state = 0; // Non-served !
-    }
-    timeleft = (24 - date_s->date.heures + date2feed[0].date.heures)*60 + (0 - date_s->date.minutes + date2feed[0].date.minutes);
-    if (timeleft > 12*60) timeleft = 12*60;
-    *date_s = date2feed[0];
   }
 }
 
 void ISR_feed(void){
-  next_date_s.date = date_t;
-  next_date_s.nbrev = 3;
-  flag_feed = true;
+  timer.disable(timerId_sec);
+  timer.disable(timerId_time);
+  feedTheCat(3);
+  timer.enable(timerId_time);
+  timer.enable(timerId_sec);
 }
+
 /* ISR_time is called every 1 min */
 void ISR_time(void){
-  // Decrementes time left
-  timeleft--;
-  if(timeleft <= 0){
+  // Update Time
+  readFromRTC(&date_t);
+  
+  // Compute time left every minute ==> no more shift
+  updateTimeLeft();
+  
+  if(timeleft < 0){
     // Ask for feed
     flag_feed = true;
   }
-  // Check if Wi-Fi is available
-  //wifiState = checkWiFi(); PROBLEMS
-  // Update Time
-  //wifiState = getNetworkTime(&date_t);
-  readFromRTC(&date_t);
 
   // Print on display
   printMainPage();
@@ -227,10 +213,25 @@ void ISR_sec(void){
   blinkColon();
 }
 
+void updateTimeLeft(){
+  if (nextmeal == 0 && date_t.heures >= meals[3].heures) // Next meal is breakfast the day after
+    timeleft = (24 + meals[nextmeal].heures - date_t.heures)*60 + (meals[nextmeal].minutes - date_t.minutes);
+  else
+    timeleft = (meals[nextmeal].heures - date_t.heures)*60 + (meals[nextmeal].minutes - date_t.minutes);
+  return;
+}
+
 void feedTheCat(const short revolutions){
    // Attach the servo to pin 9
   myservo.attach(9);
-  // First turn backward to avoid jamming
+  /*// Vibration during 2s
+  for(short i = 0 ; i < 20 ; i++){
+    myservo.write(85); // backward
+    delay(50);
+    myservo.write(95); // forward
+    delay(50);
+  }*/
+  // Then turn backward to avoid jamming
   myservo.write(85);
   delay(500);
   // Then turn forward
@@ -370,19 +371,6 @@ short getNetworkTime(Date* date){
   else if(strncmp(month,"Dec",3) == 0) date->mois=12;
   date->annee = years%2000;
 
-  /*Serial.print("Sec :");
-  Serial.println(date->secondes);
-  Serial.print("Min :");
-  Serial.println(date->minutes);
-  Serial.print("Hou :");
-  Serial.println(date->heures);
-  Serial.print("Day :");
-  Serial.println(date->jour);
-  Serial.print("Month :");
-  Serial.println(date->mois);
-  Serial.print("Year :");
-  Serial.println(date->annee);*/
-  
   return 1;
 }
 
@@ -485,17 +473,17 @@ void printWifiState(short state){
 }
 
 void printTimeLeft(void){
-  lcd.setCursor(3,2);
-  lcd.print("Time Left: ");
-  lcd.setCursor(15, 2);
+  lcd.setCursor(1 ,2);
+  lcd.print("Next meal in ");
+  lcd.setCursor(14, 2);
   lcd.print((timeleft/60) / 10, DEC); // Affichage de l'heure sur deux caractéres
-  lcd.setCursor(16, 2);
+  lcd.setCursor(15, 2);
   lcd.print((timeleft/60) % 10, DEC);
-  lcd.setCursor(17, 2);
+  lcd.setCursor(16, 2);
   lcd.print(":");
-  lcd.setCursor(18, 2);
+  lcd.setCursor(17, 2);
   lcd.print((timeleft % 60) / 10, DEC); // Affichage des minutes sur deux caractéres
-  lcd.setCursor(19, 2);
+  lcd.setCursor(18, 2);
   lcd.print((timeleft % 60) % 10, DEC);
 }
 
