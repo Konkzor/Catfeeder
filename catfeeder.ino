@@ -62,6 +62,7 @@ LiquidCrystal lcd(8, 7, 6, 5, 4, 3);
 // Variables
 short wifiState = 0;
 bool flag_feed = true;
+bool flag_button = false;
 short weightPerDay = 0;
 short timeleft = 0;
 Date date_t;
@@ -142,6 +143,15 @@ void setupFeeder(void){
 }
 
 void loop() {
+  /*if(flag_button){
+    timer.disable(timerId_sec);
+    timer.disable(timerId_time);
+    feedTheCat(3);
+    Serial.println("coucou");
+    flag_button = false;
+    timer.enable(timerId_time);
+    timer.enable(timerId_sec);
+  }*/
   if(flag_feed){
     timer.disable(timerId_sec);
     timer.disable(timerId_time);
@@ -175,20 +185,19 @@ void loop() {
 
 void findNextMeal(){
   // State setup
+  nextmeal = -1;
   for(int i = 0 ; i < nb_meals ; i++){
-    if(60*date_t.heures+date_t.minutes <= 60*meals[i].heures + meals[i].minutes){ // Meal is past
+    if(60*date_t.heures+date_t.minutes <= 60*meals[i].heures + meals[i].minutes){ // If Meal is not past, nextmeal is found
       nextmeal = i;
       break;
     }
   }
+  // If all meal are past (it is between last meal of the day and midnight)
+  if(nextmeal == -1) nextmeal = 0;
 }
 
 void ISR_feed(void){
-  timer.disable(timerId_sec);
-  timer.disable(timerId_time);
-  feedTheCat(3);
-  timer.enable(timerId_time);
-  timer.enable(timerId_sec);
+  //flag_button = true;
 }
 
 /* ISR_time is called every 1 min */
@@ -224,14 +233,7 @@ void updateTimeLeft(){
 void feedTheCat(const short revolutions){
    // Attach the servo to pin 9
   myservo.attach(9);
-  /*// Vibration during 2s
-  for(short i = 0 ; i < 20 ; i++){
-    myservo.write(85); // backward
-    delay(50);
-    myservo.write(95); // forward
-    delay(50);
-  }*/
-  // Then turn backward to avoid jamming
+  // First turn backward to avoid jamming
   myservo.write(85);
   delay(500);
   // Then turn forward
