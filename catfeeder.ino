@@ -139,7 +139,7 @@ void setupFeeder(void){
   meals[2].nb_rev = 2;
   meals[3].heures = 21;
   meals[3].minutes = 0;
-  meals[3].nb_rev = 3;
+  meals[3].nb_rev = 2;
 }
 
 void loop() {
