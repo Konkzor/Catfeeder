@@ -6,12 +6,12 @@
 #include <LiquidCrystal.h>
 #include <SoftwareSerial.h>
 
-size_t MAX_CONTENT_SIZE = 110;
-const char addr_flag = 0;
-const char addr_nbrepas = 1;
-const char addr_h1 = 2;
-const char addr_min1 = 3;
-const char addr_tours1 = 4;
+#define MAX_CONTENT_SIZE  110
+#define addr_flag 0
+#define addr_nbrepas 1
+#define addr_h1 2
+#define addr_min1 3
+#define addr_tours1 4
 
 typedef struct{
   uint8_t secondes;
@@ -33,13 +33,12 @@ typedef struct{
 #define DS1307_ADDRESS 0x68
 
 // WIFI
-String NomduReseauWifi="Bbox-SandyEtMat";
-String MotDePasse="576CC166AEC4AF5CA513334FEF7DD2";
+#define NomduReseauWifi "Bbox-SandyEtMat"
+#define MotDePasse "576CC166AEC4AF5CA513334FEF7DD2"
 #define IPraspberry "192.168.1.96"
 #define GETfromPI "GET /schedule HTTP/1.1\r\n\r\n"
 #define GET2PI "GET /log/"
 #define GETtime "GET /time HTTP/1.1\r\n\r\n"
-
 SoftwareSerial ESP8266(10, 11);
 
 // Feeder
@@ -60,8 +59,8 @@ int timerId_sec;
 
 // IOs
 Servo myservo;
-const char buttonPin = 2;    // the number of the pushbutton pin
-const char ledGreenPin = 12;   // the number of the Greed LED pin
+#define buttonPin  2    // the number of the pushbutton pin
+#define ledGreenPin  12   // the number of the Greed LED pin
 //const int ledBluePin = ??;
 
 // LCD
@@ -119,29 +118,31 @@ void setup() {
 
   //RTC synchronization
   if(wifiState == 1){
-    short state = getNetworkTime(&date_t);
-    //if (state == 1) writeToRTC(&date_t);
+    char state = getNetworkTime(&date_t);
+    if (state == 1) writeToRTC(&date_t);
+    else readFromRTC(&date_t);
   }
   else readFromRTC(&date_t);
-
+  
   // Setup feeder schedule
   setupDefaultFeeder(); // Default
-  //readSettingsFromEEPROM(); // Read from EEPROM
+  // Read from EEPROM
+  lcd.clear();
+  lcd.setCursor(2,1);
+  lcd.print("SCHEDULE UPDATE");
+  if(readSettingsFromEEPROM()){ 
+    lcd.setCursor(3,2);
+    lcd.print("EEPROM");
+  }
+  delay(1000);
+  // Get schedule from Raspberry Pi
   if(wifiState == 1){
-    lcd.clear();
-    lcd.setCursor(2,1);
-    lcd.print("SCHEDULE UPDATE");
     if(getSettingsFromRaspberry() == 1){ // Read from Raspberry Pi
-      lcd.setCursor(9,2);
-      lcd.print("OK");
-      //writeSettingsToEEPROM();
-    }
-    else {
-      lcd.setCursor(6,2);
-      lcd.print("FAILURE");
+      lcd.setCursor(12,2);
+      lcd.print("WIFI");
+      writeSettingsToEEPROM(); // Write it in EEPROM once received
     }
   }
-  
   delay(1000);
   printMainPage();
   delay(1000);
@@ -180,8 +181,13 @@ void loop() {
     
     // Send new state to Raspberry PI
     weightPerDay+=weightPerFeed;
-    if (wifiState == 0) wifiState = connect2Wifi(); // Try to reconnect
-    send2PI(String(weightPerDay));
+    if(wifiState == 0) wifiState = connect2Wifi(); // Try to reconnect
+    if(wifiState == 1){
+      if(getSettingsFromRaspberry() == 1){ // Check new schedule
+        writeSettingsToEEPROM(); // Write it in EEPROM once received
+      }
+      send2PI(String(weightPerDay));
+    }
     
     findNextMeal();
     if (nextmeal == 0){ // If next meal to serve is the breakfast
@@ -270,9 +276,9 @@ char connect2Wifi(void){
   Serial.print(recoitDuESP8266(2000));
   envoieAuESP8266("AT+CWMODE=1"); // WIFI MODE STATION
   Serial.print(recoitDuESP8266(7000));
-  envoieAuESP8266("AT+CWJAP=\"" + NomduReseauWifi + "\",\"" + MotDePasse + "\""); // JOIN ACCESS POINT
+  envoieAuESP8266("AT+CWJAP=\"" + String(NomduReseauWifi) + "\",\"" + String(MotDePasse) + "\""); // JOIN ACCESS POINT
   String res = recoitDuESP8266(5000);
-  //Serial.print(res);
+  Serial.print(res);
   if (res.indexOf("WIFI GOT IP") != -1) return 1;
   else return 0;
 }
@@ -307,8 +313,8 @@ String recoitDuESP8266(const int timeout){
 }
 
 void sendDebug(String cmd){
-  //Serial.print("SEND: ");
-  //Serial.println(cmd);
+  Serial.print("SEND: ");
+  Serial.println(cmd);
   ESP8266.println(cmd);
 }
 
