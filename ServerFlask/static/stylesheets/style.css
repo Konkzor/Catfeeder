@@ -1,0 +1,151 @@
+/***** Common rules *****/
+body
+{
+	font-family:"Cooper Std Heavy",Helvetica,sans-serif;
+	background-color:#D1E4FF;
+	color:#181818;
+}
+#bloc_page
+{
+	width:900px;
+	margin:auto;
+}
+section h1, footer h1, nav a
+{
+	font-family:Console, sans-serif;
+	font-weight:normal;
+	text-transform: uppercase;
+}
+/* Header */
+header
+{
+	display:flex;
+	flex-direction:column;
+	justify-content:space-between;
+	align-items:flex-end;
+}
+#titre_principal
+{
+	display:flex;
+	flex-direction:column;
+}
+#banniere
+{
+	display:flex;
+	flex-direction:row;
+	align-items:baseline;
+}
+#banniere img
+{
+	width: 900px;
+	height: 100px;
+}
+
+
+/* Navigation */
+nav ul
+{
+	list-style-type:none;
+	display:flex;
+}
+
+nav li
+{
+	margin-right:15px;
+}
+
+nav a
+{
+	font-size:1.3em;
+	color:#137087;
+	padding-bottom:3px;
+	text-decoration:none;
+}
+
+nav a:hover
+{
+	color: #1778FF;
+}
+
+
+/* Formulaire */
+#formulaire
+{
+	display:flex;
+	flex-direction:column;
+	align-items:center;
+}
+
+form
+{
+	background-color:#FFFFFF;
+	padding:10px;
+	width:450px;
+}
+
+legend
+{
+	color:#137087;
+	font-weight:bold;
+}
+
+input,textarea, select,option{
+	backgound-color:#C5E1FF;
+}
+
+input{
+	line-height:18px;
+	padding:5px;
+	width:50px;
+	margin-top:5px;
+	border-radius:2px;
+}
+input[type=submit]{
+	width:100px;
+	margin-left:5px;
+	cursor:pointer;
+	box-shadow:1px 1px 1px #137087;
+}
+@media screen and (max-width: 1080px)
+{
+h1
+{
+	color:red;
+}
+}
+
+
+/* Logger */
+#logger
+{
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+}
+
+#console
+{
+	display:flex;
+	flex-direction:column;
+	align-items:left;
+ 	font-family:Courier;
+	color: #CCCCCC;
+	width:900px;
+	height:300px;
+  	background: #000000;
+  	border: 3px double #CCCCCC;
+  	padding: 5px;
+  	overflow: auto;
+}
+#console p
+{
+	margin: 0em;
+}
+
+/* Footer */
+footer
+{	
+	display : flex;
+	align-items: center;
+	flex-direction : column;
+}

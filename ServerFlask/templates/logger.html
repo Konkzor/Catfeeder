@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Catfeeder mainpage</title>
+		<link rel="stylesheet" href="{{ url_for('static', filename='stylesheets/style.css') }}" />
+
+		<script type='text/javascript'>
+			function writeInConsole(){
+				var nblog = arguments[0];
+				var logs = arguments[1];
+				var console = document.getElementById("console");
+
+				if(nblog == 0){
+					var log = document.createElement("P");
+					var txt = document.createTextNode("Aucun historique.");
+					log.appendChild(txt);
+					console.appendChild(log);
+				}
+
+				for(i=0;i<nblog;i++){
+					var log = document.createElement("P");
+					var txt = document.createTextNode(logs[i]);
+					log.appendChild(txt);
+					console.appendChild(log);
+				}
+			}
+		</script>
+
+	</head>
+
+	<body>
+		<div id="bloc_page">
+			<header>
+				<div id="titre_principal">
+					<div id="banniere">
+						<img src="{{ url_for('static', filename='images/banniere2.png') }}" alt="banniere" />
+					</div>
+				</div>
+				<nav>
+					<ul>
+						<li><a href="/accueil">Accueil</a></li>
+						<li><a href="/settings">Configuration</a></li>
+						<li><a href="/logger">Historique</a></li>
+					</ul>
+				</nav>
+			</header>
+
+			<section>
+				<div id="logger">
+					<h1>Historique des activites</h1>
+					<div id="console" />
+				</div id="logger">
+
+				<script type="text/javascript">
+					writeInConsole({{ nblog }}, {{ logs|safe }});
+				</script>
+			</section>
+
+			<footer>
+				<p>Copyright MG - Tous droits réservés</p>
+			</footer>
+		</div>
+	</body>
+</html>
