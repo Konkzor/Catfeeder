@@ -1,3 +1,5 @@
+# -*- coding: UTF-8 -*-
+
 from flask import Flask, render_template, request, jsonify
 import datetime
 import itertools
@@ -16,38 +18,52 @@ def hello():
 
 @app.route("/settings", methods=['GET', 'POST'])
 def settings():
+	templateData={
+		'msgcode' : 0,
+	}
+	msgarray=[]
 	# POST method
 	if request.method == 'POST':
 		# Get number of meals
 		nbrepas = (int)(request.form['nbrepas'])
+		templateData['nbrepas'] = nbrepas
 		# Get all meals from the form
 		repas=[]
 		for i in range(1,nbrepas+1):
-			repas.append([request.form["heure"+str(i)],request.form["min"+str(i)], request.form["tours"+str(i)]])
+			repas.append([int(request.form["heure"+str(i)]),int(request.form["min"+str(i)]), int(request.form["tours"+str(i)])])
 		# Sort all meal in time order (hour and minutes)
-		repas.sort(key=lambda x: (int(x[0]),int(x[1])))
+		repas.sort(key=lambda x: (x[0],x[1]))
+		templateData['repas'] = repas
 		# Search for 2 identical times
 		repas_hm = copy.deepcopy(repas)
 		for r in repas_hm:
 			del r[2]
 		if(len(list(repas_hm for repas_hm,_ in itertools.groupby(repas_hm)))!= len(repas)) :
-			return "[ERREUR] Au moins 2 repas ont ete programmes a la meme heure !"
+			templateData['msgcode'] = 2 # fail
+			msgarray.append('[ERREUR] Au moins 2 repas ont été programmés à la même heure !')
+			templateData['msg'] = msgarray
+			return render_template('formulaire.html', **templateData)
 
 		# Everything is ok : save to file
-		open("files/meals", 'w').close()
-		f = open("files/meals", 'r+')
+		f = open("files/meals", 'w')
 		f.write(str(nbrepas)+'\n')
 		for i in range(0,nbrepas):
-			f.write(repas[i][0]+':'+repas[i][1]+','+repas[i][2]+'\n')
+			f.write(str(repas[i][0])+':'+str(repas[i][1])+','+str(repas[i][2])+'\n')
+		f.close()
 		# Send msg to the client
 		msg = "Nombre de repas : {nb} [".format(nb=str(nbrepas))
 		for r in repas:
-			msg+="{h}:{min}({nb}), ".format(h=r[0], min=r[1], nb=r[2])
-		f.close()
-		return msg[:-2]+']'
+			msg+="{h}:{min}({nb}), ".format(h=str(r[0]), min=str(r[1]), nb=str(r[2]))
+		templateData['msgcode'] = 1 # success
+		msgarray.append('[SUCCES] '+msg[:-2]+']')
+		templateData['msg'] = msgarray
+		return render_template('formulaire.html', **templateData)
 	
 	# GET method
-	templateData = getMeals();
+	templateData = getMeals()
+	templateData['msgcode'] = 0 # info
+	msgarray.append('Modifiez les paramètres puis cliquez sur "Mettre à jour"')
+	templateData['msg'] = msgarray
 	return render_template('formulaire.html', **templateData)
 
 def getMeals():
