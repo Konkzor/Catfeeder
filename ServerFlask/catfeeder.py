@@ -38,10 +38,19 @@ def settings():
 		repas_hm = copy.deepcopy(repas)
 		for r in repas_hm:
 			del r[2]
+		# Decode schedule into string (for log purpose)
+		msg = "Nombre de repas : {nb} [".format(nb=str(nbrepas))
+		for r in repas:
+			msg+="{h}:{min}({nb}), ".format(h=str(r[0]), min=str(r[1]), nb=str(r[2]))
+		
+		# Test if schedule is ok
 		if(len(list(repas_hm for repas_hm,_ in itertools.groupby(repas_hm)))!= len(repas)) :
-			templateData['msgcode'] = 2 # fail
+			templateData['msgcode'] = 2 # failure
 			msgarray.append('[ERREUR] Au moins 2 repas ont été programmés à la même heure !')
 			templateData['msg'] = msgarray
+			# Log failure
+			logInFile("Admin failed to update schedule on server. Wrong schedule was : " + msg[:-2]+'].')
+			# Serve page
 			return render_template('formulaire.html', **templateData)
 
 		# Everything is ok : save to file
@@ -50,13 +59,14 @@ def settings():
 		for i in range(0,nbrepas):
 			f.write(str(repas[i][0])+':'+str(repas[i][1])+','+str(repas[i][2])+'\n')
 		f.close()
-		# Send msg to the client
-		msg = "Nombre de repas : {nb} [".format(nb=str(nbrepas))
-		for r in repas:
-			msg+="{h}:{min}({nb}), ".format(h=str(r[0]), min=str(r[1]), nb=str(r[2]))
+		
+		# Prepare message for client
 		templateData['msgcode'] = 1 # success
 		msgarray.append('[SUCCES] '+msg[:-2]+']')
 		templateData['msg'] = msgarray
+		# Log update
+		logInFile("Admin has successfully updated schedule on server. Schedule is now : " + msg[:-2]+'].')
+		# Send message to client
 		return render_template('formulaire.html', **templateData)
 	
 	# GET method
@@ -80,6 +90,46 @@ def getMeals():
 	f.close()
 	return templateData
 
+@app.route("/logger")
+def logger():
+	# here we want to get the value of code (i.e. ?code=value)
+	code = request.args.get('code')
+	if(code == None) : # No code mentionned : serve formulaire.html page
+		f = open("files/log", 'r+')
+		content = list(reversed((f.readlines())))
+		if(len(content) > 20) :
+			maxlen = 20
+		else :
+			maxlen = len(content)
+		logs=[]
+		for i in range(0,maxlen):
+			logs.append(content[i])
+
+		templateData={
+			'nblog' : maxlen,
+			'logs' : logs
+		}
+		f.close()
+		return render_template('logger.html', **templateData)
+		
+	### GET request contains parameters = request from Arduino ###	
+	# Handle GET code
+	if(code == '0') : #Startup code
+		logInFile("Catfeeder startup.")
+	if(code == '1') : #Feed time
+		logInFile(request.args.get('qty')+" turns served.")
+
+def logInFile(msg):
+	now = datetime.datetime.now()
+	log = now.strftime("[%d-%m-%Y %H:%M:%S] ")
+	log = log + msg + '\n'
+	f = open("files/log", 'a')
+	f.write(log)
+	f.close()
+	
+#########################################
+#		SPECIAL ARDUINO FUNCTIONS		#
+#########################################
 def getMealsForArduino():
 	f = open("files/meals", 'r+')
 	nbrepas = int(f.readline())
@@ -94,12 +144,16 @@ def getMealsForArduino():
 
 @app.route("/schedule")
 def schedule():
+	# Log request
+	logInFile("Catfeeder asked server for schedule.")
+	# Serve schedule
 	templateData = getMealsForArduino()
 	return jsonify(**templateData)
 
-
 @app.route("/time")
 def time():
+	# Log request
+	logInFile("Catfeeder asked server for current time.")
 	now = datetime.datetime.now()
 	Data ={
 		's' : int(now.strftime("%S")),
@@ -111,25 +165,7 @@ def time():
 		'y' : int(now.strftime("%y"))
 	}
 	return jsonify(**Data)
-
-@app.route("/logger")
-def logger():
-	f = open("files/log", 'r+')
-	content = f.readlines()
-	if(len(content) > 20) :
-		maxlen = 20
-	else :
-		maxlen = len(content)
-	logs=[]
-	for i in range(0,maxlen):
-		logs.append(content[i])
-
-	templateData={
-		'nblog' : maxlen,
-		'logs' : logs
-	}
- 	f.close()
-	return render_template('logger.html', **templateData)
-
+	
+# Main function	
 if __name__ == "__main__":
 	app.run()
