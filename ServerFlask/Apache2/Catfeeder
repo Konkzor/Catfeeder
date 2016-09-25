@@ -1,6 +1,5 @@
 <VirtualHost *:443>
   ServerName atloupiotte.ddns.net
-
   SSLEngine On
   SSLCertificateFile /home/pi/secureProxy/server.cer
   SSLCertificateKeyFile /home/pi/secureProxy/server.key
@@ -36,6 +35,34 @@
   <Directory /var/www/FlaskApp/Catfeeder/files/>
     Order allow,deny
     Allow from all
+  </Directory>
+
+  LogLevel warn
+  ErrorLog ${APACHE_LOG_DIR}/rproxy_error.log
+  CustomLog ${APACHE_LOG_DIR}/rproxy_access.log combined
+</VirtualHost>
+
+<VirtualHost *:80>
+  WSGIDaemonProcess catfeederARDUINO threads=5 home=/var/www/FlaskApp/Catfeeder/  
+  WSGIScriptAlias / /var/www/FlaskApp/Catfeeder/flaskapp.wsgi
+  <Directory /var/www/FlaskApp/Catfeeder/>
+    WSGIProcessGroup catfeederARDUINO
+    WSGIApplicationGroup %{GLOBAL}
+    WSGIScriptReloading On
+    Order allow,deny
+    Allow from 192.168.1.3
+  </Directory>
+
+  Alias /static /var/www/FlaskApp/Catfeeder/static
+  <Directory /var/www/FlaskApp/Catfeeder/static/>
+    Order allow,deny
+    Allow from 192.168.1.3
+  </Directory>
+
+  Alias /files /var/www/FlaskApp/Catfeeder/files
+  <Directory /var/www/FlaskApp/Catfeeder/files/>
+    Order allow,deny
+    Allow from 192.168.1.3
   </Directory>
 
   LogLevel warn
