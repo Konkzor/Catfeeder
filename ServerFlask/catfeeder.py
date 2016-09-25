@@ -97,8 +97,8 @@ def logger():
 	if(code == None) : # No code mentionned : serve formulaire.html page
 		f = open("files/log", 'r+')
 		content = list(reversed((f.readlines())))
-		if(len(content) > 20) :
-			maxlen = 20
+		if(len(content) > 100) :
+			maxlen = 100
 		else :
 			maxlen = len(content)
 		logs=[]
@@ -117,7 +117,8 @@ def logger():
 	if(code == '0') : #Startup code
 		logInFile("Catfeeder startup.")
 	if(code == '1') : #Feed time
-		logInFile(request.args.get('qty')+" turns served.")
+		logInFile(request.args.get('quantity')+" turns served.")
+	return "OK"
 
 def logInFile(msg):
 	now = datetime.datetime.now()
@@ -158,7 +159,7 @@ def time():
 	Data ={
 		's' : int(now.strftime("%S")),
 		'mi' : int(now.strftime("%M")),
-		'h' : int(now.strftime("%H"))+2,
+		'h' : int(now.strftime("%H")),
 		'j' : int(now.strftime("%d")),
 		'js' : int(now.strftime("%w")),
 		'mo' : int(now.strftime("%m")),
