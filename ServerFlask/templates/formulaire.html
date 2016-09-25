@@ -61,6 +61,21 @@
 					container.appendChild(line);
 				}
 			}
+			function displayMsg(){
+				var code = arguments[0];
+				var msg = arguments[1];
+				var txt = document.createTextNode(msg[0]);
+				var msgform = document.getElementById("messageform");
+				
+				var msg_p = document.createElement("P");
+				msg_p.appendChild(txt);
+				
+				if(code == 0) msgform.className = "info";
+				if(code == 1) msgform.className = "success";
+				if(code == 2) msgform.className = "error";
+				
+				msgform.appendChild(msg_p);
+			}
 		</script>
 	</head>
 
@@ -104,6 +119,12 @@
 						addinputFields({{ nbrepas }}, {{ repas }});
 					</script>
 				</div>
+				
+				<div id="messageform" class="info" />
+				
+				<script type="text/javascript">
+					displayMsg({{ msgcode }}, {{ msg|safe }});
+				</script>
 			</section>
 			
 			<footer>
