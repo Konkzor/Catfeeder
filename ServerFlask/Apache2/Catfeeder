@@ -43,6 +43,7 @@
 </VirtualHost>
 
 <VirtualHost *:80>
+  ServerName atloupiotte.ddns.net
   WSGIDaemonProcess catfeederARDUINO threads=5 home=/var/www/FlaskApp/Catfeeder/  
   WSGIScriptAlias / /var/www/FlaskApp/Catfeeder/flaskapp.wsgi
   <Directory /var/www/FlaskApp/Catfeeder/>

@@ -1,24 +1,13 @@
-22/09/16 14:08...Repas servi (2 tours)
-22/09/16 14:09...Etat distributeur : OK
-22/09/16 14:10...Repas servi (2 tours)
-22/09/16 14:11...Etat distributeur : OK
-22/09/16 14:08...Repas servi (2 tours)
-22/09/16 14:09...Etat distributeur : OK
-22/09/16 14:10...Repas servi (2 tours)
-22/09/16 14:11...Etat distributeur : OK
-22/09/16 14:08...Repas servi (2 tours)
-22/09/16 14:09...Etat distributeur : OK
-22/09/16 14:10...Repas servi (2 tours)
-22/09/16 14:11...Etat distributeur : OK
-22/09/16 14:08...Repas servi (2 tours)
-22/09/16 14:09...Etat distributeur : OK
-22/09/16 14:10...Repas servi (2 tours)
-22/09/16 14:11...Etat distributeur : OK Etat distributeur : OK Etat distributeur : OK Etat distributeur : OK Etat distributeur : OK Etat distributeur : OK
-22/09/16 14:08...Repas servi (2 tours)
-22/09/16 14:09...Etat distributeur : OK
-22/09/16 14:10...Repas servi (2 tours)
-22/09/16 14:11...Etat distributeur : OK
-22/09/16 14:08...Repas servi (2 tours)
-22/09/16 14:09...Etat distributeur : OK
-22/09/16 14:10...Repas servi (2 tours)
-22/09/16 14:11...Etat distributeur : OK
+[25-09-2016 17:06:00] Catfeeder startup.
+[25-09-2016 17:06:20] 
+[25-09-2016 17:07:55] 
+[25-09-2016 17:08:34] 
+[25-09-2016 17:08:42] 
+[25-09-2016 17:10:02] 
+[25-09-2016 17:11:01] 2 turns served.
+[25-09-2016 17:36:20] Admin failed to update schedule on server. Wrong schedule was : Nombre de repas : 4 [7:30(3), 7:30(3), 17:30(2), 21:30(3)].
+[25-09-2016 17:36:25] Admin has updated schedule on server. Schedule is now : Nombre de repas : 4 [7:30(3), 8:30(3), 17:30(2), 21:30(3)].
+[25-09-2016 17:37:02] Catfeeder asked server for current time.
+[25-09-2016 17:37:09] Catfeeder asked server for schedule.
+[26-09-2016 09:52:15] Admin failed to update schedule on server. Wrong schedule was : Nombre de repas : 5 [7:30(3), 8:30(3), 17:30(2), 21:30(3), 21:30(3)].
+[26-09-2016 09:52:23] Admin has successfully updated schedule on server. Schedule is now : Nombre de repas : 4 [7:30(3), 8:30(3), 17:30(2), 21:30(3)].
