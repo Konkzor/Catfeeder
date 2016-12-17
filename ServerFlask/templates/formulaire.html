@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+	<head>
+		<meta charset="utf-8" />
+		<link href="https://fonts.googleapis.com/css?family=Lato|Acme" rel="stylesheet">
+		<link rel="stylesheet" href="{{ url_for('static', filename='stylesheets/style.css') }}" />
+		<link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}" />
+		<title>Catfeeder setup</title>
+
+		<script type='text/javascript'>
+			function addinputFields(){
+				var nbrepas = arguments[0];
+				var repas = arguments[1];
+				var number = document.getElementById("nbrepas").value;
+				var container = document.getElementById("container");
+
+				while(container.children.length > number){
+					container.removeChild(container.lastChild);
+				}
+
+				var index_start = 0;
+				if(container.children.length != 0){
+					index_start = container.children.length;
+				}
+
+				for(i=index_start;i<number;i++){
+					var line = document.createElement("div");
+					line.appendChild(document.createTextNode("Repas "+ (i+1) + " (h:min) : "));
+
+					var heure = document.createElement("input");
+					heure.type = "number";
+					heure.name = "heure" + (i+1);
+					heure.id = "heure" + (i+1);
+					heure.min = "0";
+					heure.max = "23";
+					if(i<nbrepas) heure.value = repas[i][0];
+					else heure.value = repas[nbrepas-1][0];
+					line.appendChild(heure);
+
+					line.appendChild(document.createTextNode(" : "));
+
+					var minute = document.createElement("input");
+					minute.type = "number";
+					minute.name = "min"+(i+1);
+					minute.id = "min"+(i+1);
+					minute.min = "0";
+					minute.max = "59";
+					if(i<nbrepas) minute.value = repas[i][1];
+					else minute.value = repas[nbrepas-1][1];
+					line.appendChild(minute);
+					
+					line.appendChild(document.createTextNode(" Nb tours : "));
+
+					var tours = document.createElement("input");
+					tours.type = "number";
+					tours.name = "tours"+(i+1);
+					tours.id = "tours"+(i+1);
+					tours.min = "1";
+					tours.max = "10";
+					if(i<nbrepas) tours.value = repas[i][2];
+					else tours.value = repas[nbrepas-1][2];
+					line.appendChild(tours);
+					
+					container.appendChild(line);
+				}
+			}
+			function displayMsg(){
+				var code = arguments[0];
+				var msg = arguments[1];
+				var txt = document.createTextNode(msg[0]);
+				var msgform = document.getElementById("messageform");
+				
+				var msg_p = document.createElement("P");
+				msg_p.appendChild(txt);
+				
+				if(code == 0) msgform.className = "info";
+				if(code == 1) msgform.className = "success";
+				if(code == 2) msgform.className = "error";
+				
+				msgform.appendChild(msg_p);
+			}
+		</script>
+	</head>
+
+	<body>	
+		<div id="bloc_page">
+            <header>
+                    <div id="titre_principal">
+                            <div id="banniere">
+                                    <img src="{{ url_for('static', filename='images/banniere2.png') }}" alt="banniere" />
+                            </div>
+                    </div>
+                    <nav>
+                            <ul>
+                                    <li><a href="/accueil">Accueil</a></li>
+                                    <li><a href="/settings">Configuration</a></li>
+                                    <li><a href="/logger">Historique</a></li>
+				    <li><a href="/camera/">Camera</a></li>
+                            </ul>
+                    </nav>
+            </header>
+
+			<section>
+				<div id="formulaire">
+					<h1>Configuration du distributeur</h1>
+
+					<form action="" method="post">
+						<fieldset>
+							<legend>Paramètres</legend>
+				
+							<label for="nbrepas">Nombre de repas / jour</label>
+							<input type="number" min="1" max="5" name="nbrepas" id="nbrepas" onchange="addinputFields({{ nbrepas }},{{ repas }})" value="{{ nbrepas }}" />
+							</br>
+							</br>
+							<div id="container" />
+						</fieldset>
+			
+						<input type="submit" value="Mettre à jour" />
+					</form>
+
+					<script type="text/javascript">
+						addinputFields({{ nbrepas }}, {{ repas }});
+					</script>
+				</div>
+				
+				<div id="messageform" class="info" />
+				
+				<script type="text/javascript">
+					displayMsg({{ msgcode }}, {{ msg|safe }});
+				</script>
+			</section>
+			
+			<footer>
+				<p>Copyright MG - Tous droits réservés</p>
+            </footer>
+		</div>
+	</body>
+</html>

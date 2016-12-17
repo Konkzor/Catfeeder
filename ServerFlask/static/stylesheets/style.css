@@ -1,0 +1,199 @@
+/***** Common rules *****/
+body
+{
+	font-family:'Lato',sans-serif;
+	background-color:#D1E4FF;
+	color:#181818;
+}
+#bloc_page
+{
+	width:900px;
+	margin:auto;
+}
+section h1
+{
+	font-family:'Acme',sans-serif;
+	font-weight:normal;
+	font-size:150%;
+	text-transform: uppercase;
+}
+nav a{
+	font-family:'Acme',sans-serif;
+	font-weight:normal;
+	font-size:300%;
+	text-transform: uppercase;
+}
+/* Header */
+header
+{
+	display:flex;
+	flex-direction:column;
+	justify-content:space-between;
+	align-items:flex-end;
+}
+#titre_principal
+{
+	display:flex;
+	flex-direction:column;
+}
+#banniere
+{
+	display:flex;
+	flex-direction:row;
+	align-items:baseline;
+}
+#banniere img
+{
+	width: 900px;
+	height: 100px;
+}
+/* Navigation */
+nav ul
+{
+	list-style-type:none;
+	display:flex;
+}
+
+nav li
+{
+	margin-right:15px;
+}
+
+nav a
+{
+	font-size:1.3em;
+	color:#137087;
+	padding-bottom:3px;
+	text-decoration:none;
+}
+
+nav a:hover
+{
+	color: #1778FF;
+}
+
+/* Mainpage */
+#overview
+{
+	display:flex;
+	flex-direction:column;
+	align-items:center;
+}
+
+#overview img
+{
+	width:640px;
+	height:400px;
+}
+
+/* Formulaire */
+#formulaire
+{
+	display:flex;
+	flex-direction:column;
+	align-items:center;
+}
+
+form
+{
+	background-color:#FFFFFF;
+	padding:10px;
+	width:450px;
+	display:flex;
+	flex-direction:column;
+	align-items:center;
+}
+
+legend
+{
+	color:#137087;
+	font-weight:bold;
+}
+
+input,textarea, select,option{
+	/* background-color:#C5E1FF; */
+}
+
+input{
+	line-height:18px;
+	padding:5px;
+	width:50px;
+	margin-top:5px;
+	border-radius:2px;
+}
+input[type=submit]{
+	width:100px;
+	margin-left:5px;
+	cursor:pointer;
+	box-shadow:1px 1px 1px #A9A9A9;
+}
+#messageform
+{
+	display:flex;
+	flex-direction:column;
+	align-items:center;
+	box-shadow:1px 1px 1px #A9A9A9;
+}
+
+.info, .success, .error{
+	color: white;
+	font-weight:bold;
+    margin: 10px 0px;
+    padding:5px 5px 5px 5px;
+}
+.info {
+    background-color: #3C6EC4;
+}
+.success {
+    background-color: #3CC44C;
+}
+.error {
+    background-color: #D61F1F;
+}
+/* Logger */
+#logger
+{
+	display:flex;
+	flex-direction:column;
+	align-items:center;
+}
+
+#console
+{
+	display:flex;
+	flex-direction:column;
+	align-items:left;
+ 	font-family:Courier;
+	color: #CCCCCC;
+	width:900px;
+	height:500px;
+  	background: #000000;
+  	border: 3px double #CCCCCC;
+  	padding: 5px;
+  	overflow: auto;
+}
+#console p
+{
+	margin: 0em;
+	font-size: 100%;
+}
+
+/* Footer */
+footer
+{	
+	display : flex;
+	align-items: center;
+	flex-direction : column;
+}
+
+@media screen and (max-width: 1080px)
+{
+#bloc_page
+{
+	width:100%;
+}
+#console
+{
+	width:100%;
+}
+}
