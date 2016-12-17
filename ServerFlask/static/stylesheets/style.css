@@ -1,7 +1,7 @@
 /***** Common rules *****/
 body
 {
-	font-family:'Istok Web',sans-serif;
+	font-family:'Lato',sans-serif;
 	background-color:#D1E4FF;
 	color:#181818;
 }
@@ -47,8 +47,6 @@ header
 	width: 900px;
 	height: 100px;
 }
-
-
 /* Navigation */
 nav ul
 {
@@ -74,6 +72,19 @@ nav a:hover
 	color: #1778FF;
 }
 
+/* Mainpage */
+#overview
+{
+	display:flex;
+	flex-direction:column;
+	align-items:center;
+}
+
+#overview img
+{
+	width:640px;
+	height:400px;
+}
 
 /* Formulaire */
 #formulaire
