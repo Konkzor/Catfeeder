@@ -107,9 +107,6 @@ void setup() {
   // IOs
   pinMode(buttonPin, INPUT_PULLUP);
   pinMode(ledGreenPin, OUTPUT);
-  //pinMode(ledBluePin, OUTPUT);
-  // Interrupt on PushButon
-  //attachInterrupt(digitalPinToInterrupt(buttonPin), ISR_feed, FALLING);
 
   // Connect to Wifi
   wifiState = connect2Wifi(true);
@@ -139,6 +136,9 @@ void setup() {
 #ifdef LCD
   printMainPage();
 #endif
+
+  // Interrupt on PushButon
+  attachInterrupt(digitalPinToInterrupt(buttonPin), ISR_feed, FALLING);
   // Timer setup
   timerId_time = timer.setInterval(60000, ISR_time); // Every 1 min
   timerId_sec = timer.setInterval(500, ISR_sec); // Every 500ms
@@ -184,13 +184,15 @@ void loop() {
       // Send log to server
       log2PI(log_str);
       // Get new schedule from server
-      bool res = getScheduleFromRaspberry();
-      delay(1000); // To let the message on display
-      // If first meal of monday has been served, update RTC time
-      if((next_date_s.date.heures == date2feed[0].date.heures) && (next_date_s.date.minutes == date2feed[0].date.minutes) && date_t.jourDeLaSemaine == 1){
-        res = getNetworkTime(&date_t);
+      if(flag_feed){
+        bool res = getScheduleFromRaspberry();
         delay(1000); // To let the message on display
-        if (res) writeToRTC(&date_t);
+        // If first meal of monday has been served, update RTC time
+        if((next_date_s.date.heures == date2feed[0].date.heures) && (next_date_s.date.minutes == date2feed[0].date.minutes) && date_t.jourDeLaSemaine == 1){
+          res = getNetworkTime(&date_t);
+          delay(1000); // To let the message on display
+          if (res) writeToRTC(&date_t);
+        }
       }
     }
 
@@ -235,9 +237,12 @@ void updateMeals(Date_s* date_s){
   }
 }
 
-/*void ISR_feed(void){
-  flag_feed_force = true;
-}*/
+void ISR_feed(void){
+  if(digitalRead(buttonPin) == 0){
+    delay(100);
+    if(digitalRead(buttonPin) == 0) flag_feed_force = true;
+  }
+}
 
 /* ISR_time is called every 1 min */
 void ISR_time(void){
