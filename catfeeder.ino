@@ -1,4 +1,3 @@
-#include <EEPROM.h>
 #include <Servo.h>
 #include <Wire.h>
 #include <SimpleTimer.h>
@@ -6,86 +5,102 @@
 #include <LiquidCrystal.h>
 #include <SoftwareSerial.h>
 
-//#define  DEBUG
+#undef DEBUG
+#define SERVO
+#define LCD
+
+#ifdef DEBUG
+ #define DEBUG_PRINT(x)  Serial.print (x)
+ #define DEBUG_PRINTLN(x)  Serial.println (x)
+#else
+ #define DEBUG_PRINT(x)
+ #define DEBUG_PRINTLN(x)
+#endif
+            
 #define MAX_CONTENT_SIZE  110
+char buffer_array[MAX_CONTENT_SIZE];
+
 #define addr_flag 0
-//addr_nbrepas addr_flag+1
-//addr_h1 addr_flag+2
-//addr_min1 addr_flag+3
-//addr_tours1 addr_flag+4
 
 typedef struct{
   uint8_t secondes;
   uint8_t minutes;
   uint8_t heures; // format 24h
-  uint8_t jourDeLaSemaine; // 1~7 = lundi, mardi, ...
+  uint8_t jourDeLaSemaine; // 1~7 = lundi, mardi, ... (for RTC purpose)
   uint8_t jour;
   uint8_t mois; 
   uint8_t annee; // format yy (ex 2012 -> 12)
 }Date;
 
 typedef struct{
-  char heures; //[0;23]
-  char minutes; //[0;59]
-  char nb_rev; //[0;10]
-}Meal;
+  Date date;
+  bool state; // 1 is done
+  short nbrev; // revolution
+}Date_s;
 
 // RTC
 #define DS1307_ADDRESS 0x68
 
 // WIFI
-#define NomduReseauWifi "Bbox-SandyEtMat"
-#define MotDePasse "576CC166AEC4AF5CA513334FEF7DD2"
-#define IPraspberry "192.168.1.96"
-#define Host "Host: www.atloupiotte.ddns.net\r\n\r\n"
-#define GETschedule "/schedule"
-#define GETlog "/logger"
+#define NomduReseauWifi "Livebox-A536"
+#define MotDePasse "4PGK3DGFrhQ5ZqnoWY"
+#define IPraspberry "192.168.1.51"
+#define PORTraspberry "5000"
+#define GETschedule "/catfeeder/schedule"
+#define GETlog "/catfeeder/logger"
 #define GETtime "/time"
 #define HTTP " HTTP/1.1\r\n"
+
 SoftwareSerial ESP8266(10, 11);
 
 // Feeder
 #define timeForOneTurn 2000 // ms
-//#define weightPerFeed 20 // g
-Meal meals[5];
-char nextmeal = 0;
-char nb_meals = 4; // Default
+Date_s date2feed[5];
+int nb_meals = 4;
+// Breakfast at 7H
+// Lunch at 11H30
+// Break at 17H
+// Dinner at 21H
 
 // Timer
 SimpleTimer timer;
-char timerId_time;
-char timerId_sec;
+int timerId_time;
+int timerId_sec;
 
 // IOs
-#define buttonPin  2    // the number of the pushbutton pin
-#define ledGreenPin  12   // the number of the Greed LED pin
-//const int ledBluePin = ??;
+#ifdef SERVO
+Servo myservo;
+#endif
+const int buttonPin = 2;    // the number of the pushbutton pin
+const int ledGreenPin = 12;   // the number of the Greed LED pin
 
 // LCD
+#ifdef LCD
 LiquidCrystal lcd(8, 7, 6, 5, 4, 3);
+#endif
 
 // Variables
-bool wifiState = true;
+short wifiState = 0;
 bool flag_feed = true;
-//bool flag_button = false;
-//short weightPerDay = 0;
+bool flag_feed_force = false;
 short timeleft = 0;
 Date date_t;
+Date_s next_date_s;
 
 void setup() {
+  bool res = false;
   // ESP8266 baudrate setup
-  ESP8266.begin(115200);
-  envoieAuESP8266("AT+CIOBAUD=9600");
-  recoitDuESP8266(4000);
   ESP8266.begin(9600);
   
   // Serial
 #ifdef DEBUG
-  Serial.begin(9600);
+  Serial.begin(115200);
 #endif
-  // LCD setup
-  lcd.begin(20, 4);
 
+  // LCD setup
+#ifdef LCD
+  lcd.begin(20, 4);
+#endif
   // RTC setup (I2C)
   Wire.begin();
   
@@ -97,54 +112,33 @@ void setup() {
   //attachInterrupt(digitalPinToInterrupt(buttonPin), ISR_feed, FALLING);
 
   // Connect to Wifi
-  lcd.setCursor(8,1);
-  lcd.print("WIFI");
-  lcd.setCursor(4,2);
-  lcd.print("CONNECTION...");
-  wifiState = connect2Wifi();
-  lcd.clear();
-  lcd.setCursor(2,1);
-  lcd.print("WIFI CONNECTION");
-  if(wifiState){
-      lcd.setCursor(5,2);
-      lcd.print("SUCCEEDED");
-      log2PI("?code=0");
-  }
-  else {
-      lcd.setCursor(7,2);
-      lcd.print("FAILED");
-  }
+  wifiState = connect2Wifi(true);
+  if(wifiState) log2PI("?code=0");
   delay(2000);
 
   //RTC synchronization
   if(wifiState){
-    if (getNetworkTime(&date_t)) writeToRTC(&date_t);
+    res = getNetworkTime(&date_t);
+    if (res) writeToRTC(&date_t);
     else readFromRTC(&date_t);
   }
   else readFromRTC(&date_t);
+  delay(1000);
   
   // Setup feeder schedule
+  next_date_s.date = date_t;
+  next_date_s.nbrev = 2;
   setupDefaultFeeder(); // Default
-  // Read from EEPROM
-  lcd.clear();
-  lcd.setCursor(2,1);
-  lcd.print("SCHEDULE UPDATE");
-  if(readSettingsFromEEPROM()){ 
-    lcd.setCursor(3,2);
-    lcd.print("EEPROM");
-  }
-  delay(2000);
+  
   // Get schedule from Raspberry Pi
   if(wifiState){
-    if(getSettingsFromRaspberry()){ // Read from Raspberry Pi
-      lcd.setCursor(12,2);
-      lcd.print("WIFI");
-      writeSettingsToEEPROM(); // Write it in EEPROM once received
-    }
+    res = getScheduleFromRaspberry();
+    delay(1000);
   }
-  delay(1000);
+  
+#ifdef LCD
   printMainPage();
-  delay(1000);
+#endif
   // Timer setup
   timerId_time = timer.setInterval(60000, ISR_time); // Every 1 min
   timerId_sec = timer.setInterval(500, ISR_sec); // Every 500ms
@@ -153,59 +147,61 @@ void setup() {
 void setupDefaultFeeder(void){
   nb_meals = 4;
   // Time setups
-  meals[0].heures = 7;
-  meals[0].minutes = 0;
-  meals[0].nb_rev = 3;
-  meals[1].heures = 11;
-  meals[1].minutes = 30;
-  meals[1].nb_rev = 2;
-  meals[2].heures = 17;
-  meals[2].minutes = 0;
-  meals[2].nb_rev = 2;
-  meals[3].heures = 21;
-  meals[3].minutes = 0;
-  meals[3].nb_rev = 2;
+  date2feed[0].date.heures = 7;
+  date2feed[0].date.minutes = 0;
+  date2feed[0].nbrev = 2;
+  date2feed[1].date.heures = 12;
+  date2feed[1].date.minutes = 0;
+  date2feed[1].nbrev = 2;
+  date2feed[2].date.heures = 17;
+  date2feed[2].date.minutes = 0;
+  date2feed[2].nbrev = 1;
+  date2feed[3].date.heures = 21;
+  date2feed[3].date.minutes = 0;
+  date2feed[3].nbrev = 2;
 }
 
 void loop() {
-  if(flag_feed){
+  if(flag_feed || flag_feed_force){
     timer.disable(timerId_sec);
     timer.disable(timerId_time);
     
     // Feed the cat
+#ifdef LCD
     printTime2Eat();
+#endif
     digitalWrite(ledGreenPin, HIGH);
-    feedTheCat(meals[nextmeal].nb_rev);
+    feedTheCat(next_date_s.nbrev);
     digitalWrite(ledGreenPin, LOW);
+
+    // If not connected, try to reconnect
+    if(!wifiState) wifiState = connect2Wifi(false);
     
-    // Send new state to Raspberry PI
-    //weightPerDay+=weightPerFeed;
-    if(!wifiState) wifiState = connect2Wifi(); // Try to reconnect
+    // If connected to the internet
     if(wifiState){
-      if(meals[nextmeal].nb_rev == 1) log2PI("?code=1&quantity=1");
-      else if (meals[nextmeal].nb_rev == 2) log2PI("?code=1&quantity=2");
-      else if (meals[nextmeal].nb_rev == 3) log2PI("?code=1&quantity=3");
-      else if (meals[nextmeal].nb_rev == 4) log2PI("?code=1&quantity=4");
-      else if (meals[nextmeal].nb_rev == 5) log2PI("?code=1&quantity=5");
-      else if (meals[nextmeal].nb_rev == 6) log2PI("?code=1&quantity=6");
-      else if (meals[nextmeal].nb_rev == 7) log2PI("?code=1&quantity=7");
-      else if (meals[nextmeal].nb_rev == 8) log2PI("?code=1&quantity=8");
-      else if (meals[nextmeal].nb_rev == 9) log2PI("?code=1&quantity=9");
-      else if (meals[nextmeal].nb_rev == 10) log2PI("?code=1&quantity=10");
-      if(getSettingsFromRaspberry()){ // Check new schedule
-        writeSettingsToEEPROM(); // Write it in EEPROM once received
+      String log_str = "?code=1&quantity=";
+      log_str += String(next_date_s.nbrev);
+      // Send log to server
+      log2PI(log_str);
+      // Get new schedule from server
+      bool res = getScheduleFromRaspberry();
+      delay(1000); // To let the message on display
+      // If first meal of monday has been served, update RTC time
+      if((next_date_s.date.heures == date2feed[0].date.heures) && (next_date_s.date.minutes == date2feed[0].date.minutes) && date_t.jourDeLaSemaine == 1){
+        res = getNetworkTime(&date_t);
+        delay(1000); // To let the message on display
+        if (res) writeToRTC(&date_t);
       }
     }
-    
-    findNextMeal();
-    /*if (nextmeal == 0){ // If next meal to serve is the breakfast
-      weightPerDay = 0;
-    }*/
 
-    updateTimeLeft(); // To be sure timeleft has been computed
+    if(flag_feed) updateMeals(&next_date_s);
+    
+#ifdef LCD
     printMainPage();
+#endif
 
     flag_feed = false;
+    flag_feed_force = false;
     timer.enable(timerId_time);
     timer.enable(timerId_sec);
   }
@@ -213,290 +209,321 @@ void loop() {
   timer.run();
 }
 
-void findNextMeal(){
+void updateMeals(Date_s* date_s){
   // State setup
-  nextmeal = -1;
-  for(char i = 0 ; i < nb_meals ; i++){
-    if(60*date_t.heures+date_t.minutes <= 60*meals[i].heures + meals[i].minutes){ // If Meal is not past, nextmeal is found
-      nextmeal = i;
+  for(int i = 0 ; i < nb_meals ; i++){
+    if(60*date_s->date.heures+date_s->date.minutes >= 60*date2feed[i].date.heures + date2feed[i].date.minutes){ // Meal is past
+      date2feed[i].state = 1; // Served !
+      timeleft = 0;
+    }
+    else{
+      date2feed[i].state = 0;
+      timeleft = (date2feed[i].date.heures - date_t.heures)*60 + (date2feed[i].date.minutes - date_t.minutes);
+      *date_s = date2feed[i]; // For next time
       break;
     }
   }
-  // If all meal are past (it is between last meal of the day and midnight)
-  if(nextmeal == -1) nextmeal = 0;
+
+  // If all meal are served, then reload all of them and set next meal as breakfast
+  if (timeleft == 0){
+    for(int i = 0 ; i < nb_meals ; i++){
+       date2feed[i].state = 0; // Non-served !
+    }
+    timeleft = (24 - date_t.heures + date2feed[0].date.heures)*60 + (0 - date_t.minutes + date2feed[0].date.minutes);
+    if (timeleft > 12*60) timeleft = 12*60;
+    *date_s = date2feed[0];
+  }
 }
 
 /*void ISR_feed(void){
-  //flag_button = true;
+  flag_feed_force = true;
 }*/
 
 /* ISR_time is called every 1 min */
 void ISR_time(void){
-  // Update Time
-  readFromRTC(&date_t);
-  
-  // Compute time left every minute ==> no more shift
-  updateTimeLeft();
-  
-  if(timeleft < 0){
+  // Decrementes time left
+  timeleft--;
+  if(timeleft <= 0){
     // Ask for feed
     flag_feed = true;
   }
+  // Update Time
+  readFromRTC(&date_t);
 
   // Print on display
+#ifdef LCD
   printMainPage();
+#endif
   return;
 }
 
 void ISR_sec(void){
+#ifdef LCD
   blinkColon();
+#endif
 }
 
-void updateTimeLeft(){
-  if (nextmeal == 0 && date_t.heures >= meals[3].heures) // Next meal is breakfast the day after
-    timeleft = (24 + meals[nextmeal].heures - date_t.heures)*60 + (meals[nextmeal].minutes - date_t.minutes);
-  else
-    timeleft = (meals[nextmeal].heures - date_t.heures)*60 + (meals[nextmeal].minutes - date_t.minutes);
-  return;
-}
-
-void feedTheCat(const char revolutions){
-  Servo myservo;
+void feedTheCat(const short revolutions){
+#ifdef SERVO
    // Attach the servo to pin 9
   myservo.attach(9);
   // First turn backward to avoid jamming
   myservo.write(85);
   delay(500);
   // Then turn forward
-  for(char i = 0 ; i < revolutions ; i++){
+  for(short i = 0 ; i < revolutions ; i++){
     myservo.write(95);
     delay(timeForOneTurn);
+    myservo.write(85);
+    delay(250);
   }
   myservo.write(90);
   // Detach the servo to rest
   myservo.detach();
+#endif
 }
 
 /******************************************************************************
  *                              WIFI FUNCTIONS                                *
  ******************************************************************************/
-bool connect2Wifi(void){
-  envoieAuESP8266("AT");//+RST"); // WORKING ?
-  String res = recoitDuESP8266(2000);
-#ifdef DEBUG
-  Serial.print(res);
+short connect2Wifi(bool reset){
+#ifdef LCD
+  lcd.clear();
+  lcd.setCursor(8,1);
+  lcd.print("WIFI");
+  lcd.setCursor(4,2);
+  lcd.print("CONNECTION...");
 #endif
+
+  bool state = false;
+  if(reset) envoieAuESP8266("AT+RST");
+  else envoieAuESP8266("AT");
+  bool res = recoitDuESP8266(2000L, -1);
   envoieAuESP8266("AT+CWMODE=1"); // WIFI MODE STATION
-  res = recoitDuESP8266(7000);
-#ifdef DEBUG
-  Serial.print(res);
-#endif
+  res = recoitDuESP8266(5000L, -1);
   envoieAuESP8266("AT+CWJAP=\"" + String(NomduReseauWifi) + "\",\"" + String(MotDePasse) + "\""); // JOIN ACCESS POINT
-  res = recoitDuESP8266(5000);
-#ifdef DEBUG
-  Serial.print(res);
+  res = recoitDuESP8266(7000L, -1);
+  state = checkWiFi();
+  envoieAuESP8266("AT+CIPMUX=0");
+  res = recoitDuESP8266(2000L, -1);
+
+#ifdef LCD
+  lcd.clear();
+  lcd.setCursor(2,1);
+  lcd.print("WIFI CONNECTION");
+  if(state){
+      lcd.setCursor(5,2);
+      lcd.print("SUCCEEDED");
+  }
+  else {
+      lcd.setCursor(7,2);
+      lcd.print("FAILED");
+  }
 #endif
-  if (res.indexOf("WIFI GOT IP") != -1) return true;
-  else return false;
+
+  return state;
 }
 
-/*char checkWiFi(void){
-  envoieAuESP8266("AT+CIFSR");
-  delay(2000);
-  if(ESP8266.find("OK")){
-    return 1;
-  }
-  else{
-    return 0;
-  }
-}*/
+bool checkWiFi(void){
+  envoieAuESP8266("AT+CIPSTATUS");
+  bool res = recoitDuESP8266(3000, '2'); // 2 means not connected bu got IP
+  return res;
+}
 
 void envoieAuESP8266(String commande){
   ESP8266.println(commande);
 }
 
-String recoitDuESP8266(const short timeout){
-  String reponse = "res : ";
-  unsigned long time = millis();
-  while ( (time + timeout) > millis())
+bool recoitDuESP8266(const long int timeout, char start_char){
+  char c;
+  char i = 0;
+  bool bufferize = false;
+  
+  if(start_char == 0) bufferize = true;
+  
+  long int t_start = millis();
+  while ((t_start + timeout) > millis())
   {
-    while (ESP8266.available())
-    {
-      char c = ESP8266.read();
-      reponse += c;
+    if(ESP8266.available()>0){
+      c = ESP8266.read();
+      if(c == start_char){
+        bufferize = true;
+        i = 0;
+        DEBUG_PRINT(">>");
+      }
+      DEBUG_PRINT(c);
+      if(bufferize){
+        buffer_array[i] = c;
+        i++;
+        if(i == MAX_CONTENT_SIZE){
+          DEBUG_PRINTLN("RX buffer is full");
+          break;
+        }
+      }
     }
   }
-  return reponse;
+  return bufferize;
 }
 
-bool getNetworkTime(Date* date){
-  // Start session
-  String cmd = "AT+CIPSTART=\"TCP\",\"";
-  cmd += IPraspberry;
-  cmd += "\",80";
+short getNetworkTime(Date* date){
+#ifdef LCD
+  lcd.clear();
+  lcd.setCursor(1,1);
+  lcd.print("TIME & DATE UPDATE");
+#endif
   String request = "GET ";
   request += GETtime; // Get settings
   request += HTTP;
   // Send request. Exit if failed
-  if(!sendRequest(cmd, request)) return false;
+  bool res = sendRequest(request, true);
   
-  // Get json object
-  char buffer_array[MAX_CONTENT_SIZE];
-  if(!decodeJson("\"h\": ", buffer_array)) return false;
-  StaticJsonBuffer<100> jsonBuffer;
-  JsonObject& root = jsonBuffer.parseObject(buffer_array);
-  if (!root.success()) {
-#ifdef DEBUG
-    Serial.println("Time : parseObject() failed");
-#endif
-    return false;
+  if(res){
+    DEBUG_PRINTLN("JSON received");
+    StaticJsonBuffer<100> jsonBuffer;
+    // Get json object
+    JsonObject& root = jsonBuffer.parseObject(buffer_array);
+    if (!root.success()) {
+      DEBUG_PRINTLN("Time: Parsing JSON failed");
+      res = false;
+    }
+    else{
+      DEBUG_PRINTLN("Time : Parsing JSON succeeded");
+      // Get informations
+      date->secondes = root["s"];
+      date->minutes = root["mi"];
+      date->heures = root["h"]; // GMT + 2
+      if(root["js"]==0) date->jourDeLaSemaine = 7; // 0 is sunday, 6 is saturday
+      else date->jourDeLaSemaine = root["js"];
+      date->jour = root["j"];
+      date->mois= root["mo"];
+      date->annee = root["y"];
+  
+      // No need to close the session, already done
+      res = true;
+    }
+  }  
+  else{
+    DEBUG_PRINTLN("JSON not received.");
+    res = false;
   }
-#ifdef DEBUG
-  Serial.println("Time : parseObject() succeeded");
+
+#ifdef LCD
+  if(res){ // Read from Raspberry Pi
+    lcd.setCursor(5,2);
+    lcd.print("SUCCEEDED");
+  }
+  else{
+    lcd.setCursor(7,2);
+    lcd.print("FAILED");
+  }
 #endif
-  // Get informations
-  date->secondes = root["s"];
-  date->minutes = root["mi"];
-  date->heures = root["h"]; // GMT + 2
-  if(root["js"]==0) date->jourDeLaSemaine = 7;
-  else date->jourDeLaSemaine = root["js"];
-  date->jour = root["j"];
-  date->mois= root["mo"];
-  date->annee = root["y"];
-  
-  // Close session
-  sendDebug("AT+CIPCLOSE");
-  return true;
+
+  return res;
 }
 
 bool log2PI(String msg){
-  // Start session
-  String cmd = "AT+CIPSTART=\"TCP\",\"";
-  cmd += IPraspberry;
-  cmd += "\",80";
   String request = "GET ";
   request += GETlog; // Get settings
   request += msg;
   request += HTTP;
   
   // Send request. Exit if failed
-  if(!sendRequest(cmd, request)) return false;
+  bool res = sendRequest(request, false);
 
   // Answer treatment
-  if(ESP8266.find("OK")){
-#ifdef DEBUG
-    Serial.println("RECEIVED: OK");
-#endif
-  }
-  else{
-#ifdef DEBUG
-    Serial.println("RECEIVED: Error");
-#endif
+  /*if(response.indexOf("OK") == -1){
+    DEBUG_PRINTLN("Log sending failed");
     return false;
   }
+  DEBUG_PRINTLN("Log successfully sent");*/
 
-  // Close session
-  sendDebug("AT+CIPCLOSE");
+  // No need to close the session, already done
   return true;
 }
 
-bool getSettingsFromRaspberry(void){
-  // Start session
-  String cmd = "AT+CIPSTART=\"TCP\",\"";
-  cmd += IPraspberry;
-  cmd += "\",80";
+bool getScheduleFromRaspberry(void){
+#ifdef LCD
+  lcd.clear();
+  lcd.setCursor(2,1);
+  lcd.print("SCHEDULE UPDATE");
+#endif
+
   String request = "GET ";
   request += GETschedule; // Get settings
   request += HTTP;
   // Send request. Exit if failed
-  if(!sendRequest(cmd, request)) return false;
-  
-  // Get json object
-  char buffer_array[MAX_CONTENT_SIZE];
-  if(!decodeJson("\"nb\": ", buffer_array)) return false;
-  StaticJsonBuffer<100> jsonBuffer;
-  JsonObject& root = jsonBuffer.parseObject(buffer_array);
-  if (!root.success()) {
-#ifdef DEBUG
-    Serial.println("Schedule : parseObject() failed");
-#endif
-    return false;
-  }
-#ifdef DEBUG
-  Serial.println("Schedule parseObject() succeeded");
-#endif
-  // Get informations
-  nb_meals = root["nb"];
-  for(char i =0;i<nb_meals;i++){
-    const char* repas = root["r"+String(i+1)];
-    meals[i].heures = (String(repas).substring(0,String(repas).indexOf(':'))).toInt();
-    meals[i].minutes = (String(repas).substring(String(repas).indexOf(':')+1,String(repas).indexOf(','))).toInt();
-    meals[i].nb_rev = (String(repas).substring(String(repas).indexOf(',')+1)).toInt();
-  }
-  // Close session
-  sendDebug("AT+CIPCLOSE");
-  return true;
-}
+  bool res = sendRequest(request, true);
 
-bool decodeJson(char* start, char* buffer_array)
-{
-  sprintf(buffer_array, "{%s", start);
-  char i;
-  if(ESP8266.find(start))
-  {
-    for (i = String(start).length(); i < MAX_CONTENT_SIZE; i++)
-    {
-      if (ESP8266.available())  //new characters received?
-      {
-        char c = ESP8266.read();
-        buffer_array[i] = c;
-        if(c == '}') break;
+  if(res){
+    DEBUG_PRINTLN("JSON received");
+    StaticJsonBuffer<100> jsonBuffer;
+    // Get json object
+    JsonObject& root = jsonBuffer.parseObject(buffer_array);
+    if (!root.success()) {
+      DEBUG_PRINTLN("Schedule: Parsing JSON failed");
+      res=false;
+    }
+    else{
+      DEBUG_PRINTLN("Schedule : Parsing JSON succeeded");
+        
+      // Get informations
+      nb_meals = root["nb"];
+      for(char i =0;i<nb_meals;i++){
+        const char* repas = root["r"+String(i+1)];
+        date2feed[i].date.heures = (String(repas).substring(0,String(repas).indexOf(':'))).toInt();
+        date2feed[i].date.minutes = (String(repas).substring(String(repas).indexOf(':')+1,String(repas).indexOf(','))).toInt();
+        date2feed[i].nbrev = (String(repas).substring(String(repas).indexOf(',')+1)).toInt();
       }
-      else i--;  //if not, keep going round loop until we've got all the characters
+      
+      // No need to close the session, already done
+      res = true;
     }
   }
-  if(i == MAX_CONTENT_SIZE-1){ // The JSon object is too big
-    sendDebug("AT+CIPCLOSE");
-    return false;
+  else{
+    DEBUG_PRINTLN("JSON not received.");
+    res = false;
   }
-  return true;
+
+#ifdef LCD
+    if(res){ // Read from Raspberry Pi
+      lcd.setCursor(5,2);
+      lcd.print("SUCCEEDED");
+    }
+    else{
+      lcd.setCursor(7,2);
+      lcd.print("FAILED");
+      }
+#endif
+
+  return res;
 }
 
-bool sendRequest(String cmd, String request){
-  sendDebug(cmd);
-  delay(2000);
-  if(ESP8266.find("Error")){
-#ifdef DEBUG
-    Serial.print("RECEIVED: Error");
-#endif
-    return false;
-  }
-  
-  ESP8266.print("AT+CIPSEND=");
-  ESP8266.println((request+Host).length());
-  if(ESP8266.find(">")){
-#ifdef DEBUG
-    Serial.print(">");
-    Serial.print(request);
-#endif
-    ESP8266.print(request+Host);
-  }else{
-    sendDebug("AT+CIPCLOSE");
-    return false;
-  }
-  return true;
-}
-
-void sendDebug(String cmd){
-#ifdef DEBUG
-  Serial.print("SEND: ");
-  Serial.println(cmd);
-#endif
+bool sendRequest(String request, bool waitForJSON){
+  bool res = false;
+  // Start session
+  String cmd = "AT+CIPSTART=\"TCP\",\"";
+  cmd += IPraspberry;
+  cmd += "\",";
+  cmd += PORTraspberry;
   ESP8266.println(cmd);
+  res = recoitDuESP8266(2000L, -1);
+  
+  String cmd_send = "AT+CIPSEND=";
+  cmd_send += String(request.length() + 2);
+  ESP8266.println(cmd_send);
+  delay(2000);
+  res = recoitDuESP8266(2000L, -1);
+
+  ESP8266.println(request);
+  if(waitForJSON) res = recoitDuESP8266(5000L, '{');
+  else res = recoitDuESP8266(5000L, -1);
+  
+  return res;
 }
 /******************************************************************************
  *                              LCD FUNCTIONS                                 *
  ******************************************************************************/
+#ifdef LCD
 void printDateAndHour(Date *date) {
   lcd.setCursor(0, 0); // Place le curseur à (0,0)
   lcd.print(date->jour / 10, DEC);// Affichage du jour sur deux caractéres
@@ -534,33 +561,37 @@ void printTime2Eat(void){
 }
 
 void blinkColon(void){
-  static bool state = true;
+  static char state = 1;
   lcd.setCursor(17, 0);
   
-  if(state) lcd.print(":");
+  if(state == 1) lcd.print(":");
   else lcd.print(" ");
 
-  state=!state;
+  state = -state;
 }
 
-void printWifiState(bool state){
+void printWifiState(short state){
   lcd.setCursor(10,0);
-  if(state) lcd.print("WF");
-  else lcd.print("__");
+  if(state ==1){
+    lcd.print("WF");
+  }
+  else{
+    lcd.print("__");
+  }
 }
 
 void printTimeLeft(void){
-  lcd.setCursor(1 ,2);
-  lcd.print("Next meal in ");
-  lcd.setCursor(14, 2);
-  lcd.print((timeleft/60) / 10, DEC); // Affichage de l'heure sur deux caractéres
+  lcd.setCursor(1,2);
+  lcd.print("Next meal in:");
   lcd.setCursor(15, 2);
-  lcd.print((timeleft/60) % 10, DEC);
+  lcd.print((timeleft/60) / 10, DEC); // Affichage de l'heure sur deux caractéres
   lcd.setCursor(16, 2);
-  lcd.print(":");
+  lcd.print((timeleft/60) % 10, DEC);
   lcd.setCursor(17, 2);
-  lcd.print((timeleft % 60) / 10, DEC); // Affichage des minutes sur deux caractéres
+  lcd.print(":");
   lcd.setCursor(18, 2);
+  lcd.print((timeleft % 60) / 10, DEC); // Affichage des minutes sur deux caractéres
+  lcd.setCursor(19, 2);
   lcd.print((timeleft % 60) % 10, DEC);
 }
 
@@ -570,6 +601,7 @@ void printMainPage(){
   printTimeLeft();
   printWifiState(wifiState);
 }
+#endif
 /******************************************************************************
  *                              RTC FUNCTIONS                                 *
  ******************************************************************************/
@@ -613,29 +645,3 @@ byte bcd2dec(byte bcd) {
 byte dec2bcd(byte dec) {
   return ((dec / 10 * 16) + (dec % 10));
 }
-
-/******************************************************************************
- *                              EEPROM FUNCTIONS                              *
- ******************************************************************************/
-bool readSettingsFromEEPROM(){
-  if(EEPROM.read(addr_flag) != 0){
-    nb_meals = EEPROM.read(addr_flag+1);
-    for(char i=0;i<nb_meals;i++){
-      meals[i].heures = EEPROM.read(addr_flag+2+3*i);
-      meals[i].minutes = EEPROM.read(addr_flag+3+3*i);
-      meals[i].nb_rev = EEPROM.read(addr_flag+4+3*i);
-    }
-    return true;
-  }
-  return false;
-}
-void writeSettingsToEEPROM(){
-  EEPROM.write(addr_flag+1, nb_meals);
-  for(char i=0;i<nb_meals;i++){
-      EEPROM.write(addr_flag+2+3*i, meals[i].heures);
-      EEPROM.write(addr_flag+3+3*i, meals[i].minutes);
-      EEPROM.write(addr_flag+4+3*i, meals[i].nb_rev);
-    }
-  EEPROM.write(addr_flag, 1);
-}
-
