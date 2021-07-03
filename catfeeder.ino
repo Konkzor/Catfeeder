@@ -10,8 +10,8 @@
 #define LCD
 
 #ifdef DEBUG
- #define DEBUG_PRINT(x)  Serial.print (x)
- #define DEBUG_PRINTLN(x)  Serial.println (x)
+ #define DEBUG_PRINT(x)  Serial.print(x)
+ #define DEBUG_PRINTLN(x)  Serial.println(x)
 #else
  #define DEBUG_PRINT(x)
  #define DEBUG_PRINTLN(x)
@@ -90,11 +90,11 @@ Date_s next_date_s;
 void setup() {
   bool res = false;
   // ESP8266 baudrate setup
-  ESP8266.begin(9600);
+  ESP8266.begin(115200);
   
   // Serial
 #ifdef DEBUG
-  Serial.begin(115200);
+  Serial.begin(9600);
 #endif
 
   // LCD setup
