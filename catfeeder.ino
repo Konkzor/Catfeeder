@@ -384,24 +384,24 @@ short getNetworkTime(Date* date){
   
   if(res){
     DEBUG_PRINTLN("JSON received");
-    StaticJsonBuffer<100> jsonBuffer;
+    StaticJsonDocument<100> jsonBuffer;
     // Get json object
-    JsonObject& root = jsonBuffer.parseObject(buffer_array);
-    if (!root.success()) {
+    auto error = deserializeJson(jsonBuffer, buffer_array);
+    if (error) {
       DEBUG_PRINTLN("Time: Parsing JSON failed");
       res = false;
     }
     else{
       DEBUG_PRINTLN("Time : Parsing JSON succeeded");
       // Get informations
-      date->secondes = root["s"];
-      date->minutes = root["mi"];
-      date->heures = root["h"]; // GMT + 2
-      if(root["js"]==0) date->jourDeLaSemaine = 7; // 0 is sunday, 6 is saturday
-      else date->jourDeLaSemaine = root["js"];
-      date->jour = root["j"];
-      date->mois= root["mo"];
-      date->annee = root["y"];
+      date->secondes = jsonBuffer["s"];
+      date->minutes = jsonBuffer["mi"];
+      date->heures = jsonBuffer["h"]; // GMT + 2
+      if(jsonBuffer["js"]==0) date->jourDeLaSemaine = 7; // 0 is sunday, 6 is saturday
+      else date->jourDeLaSemaine = jsonBuffer["js"];
+      date->jour = jsonBuffer["j"];
+      date->mois= jsonBuffer["mo"];
+      date->annee = jsonBuffer["y"];
   
       // No need to close the session, already done
       res = true;
@@ -461,10 +461,10 @@ bool getScheduleFromRaspberry(void){
 
   if(res){
     DEBUG_PRINTLN("JSON received");
-    StaticJsonBuffer<100> jsonBuffer;
+    StaticJsonDocument<100> jsonBuffer;
     // Get json object
-    JsonObject& root = jsonBuffer.parseObject(buffer_array);
-    if (!root.success()) {
+    auto error = deserializeJson(jsonBuffer, buffer_array);
+    if (error) {
       DEBUG_PRINTLN("Schedule: Parsing JSON failed");
       res=false;
     }
@@ -472,9 +472,9 @@ bool getScheduleFromRaspberry(void){
       DEBUG_PRINTLN("Schedule : Parsing JSON succeeded");
         
       // Get informations
-      nb_meals = root["nb"];
+      nb_meals = jsonBuffer["nb"];
       for(char i =0;i<nb_meals;i++){
-        const char* repas = root["r"+String(i+1)];
+        const char* repas = jsonBuffer["r"+String(i+1)];
         date2feed[i].date.heures = (String(repas).substring(0,String(repas).indexOf(':'))).toInt();
         date2feed[i].date.minutes = (String(repas).substring(String(repas).indexOf(':')+1,String(repas).indexOf(','))).toInt();
         date2feed[i].nbrev = (String(repas).substring(String(repas).indexOf(',')+1)).toInt();
