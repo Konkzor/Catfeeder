@@ -2,10 +2,10 @@
 #include <Wire.h>
 #include <SimpleTimer.h>
 #include <ArduinoJson.h>
-#include <LiquidCrystal.h>
+#include <LiquidCrystal_I2C.h>
 #include <SoftwareSerial.h>
 
-#undef DEBUG
+#define DEBUG
 #define SERVO
 #define LCD
 
@@ -71,12 +71,13 @@ int timerId_sec;
 #ifdef SERVO
 Servo myservo;
 #endif
-const int buttonPin = 2;    // the number of the pushbutton pin
-const int ledGreenPin = 12;   // the number of the Greed LED pin
+const int buttonPin = 3;    // the number of the pushbutton pin
+const int ledPin = 1;       // the number of the LED pin
 
 // LCD
 #ifdef LCD
-LiquidCrystal lcd(8, 7, 6, 5, 4, 3);
+const int enLCD = 13;
+LiquidCrystal_I2C lcd(0x27,20,4);
 #endif
 
 // Variables
@@ -99,14 +100,17 @@ void setup() {
 
   // LCD setup
 #ifdef LCD
-  lcd.begin(20, 4);
+  pinMode(enLCD, OUTPUT);
+  digitalWrite(enLCD, HIGH);
+  lcd.init();
+  lcd.backlight();
 #endif
   // RTC setup (I2C)
   Wire.begin();
   
   // IOs
   pinMode(buttonPin, INPUT_PULLUP);
-  pinMode(ledGreenPin, OUTPUT);
+  pinMode(ledPin, OUTPUT);
 
   // Connect to Wifi
   wifiState = connect2Wifi(true);
@@ -170,9 +174,9 @@ void loop() {
 #ifdef LCD
     printTime2Eat();
 #endif
-    digitalWrite(ledGreenPin, HIGH);
+    digitalWrite(ledPin, HIGH);
     feedTheCat(next_date_s.nbrev);
-    digitalWrite(ledGreenPin, LOW);
+    digitalWrite(ledPin, LOW);
 
     // If not connected, try to reconnect
     if(!wifiState) wifiState = connect2Wifi(false);
