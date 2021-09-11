@@ -5,9 +5,16 @@
 #include <LiquidCrystal_I2C.h>
 #include <SoftwareSerial.h>
 
+#define SIZEOFARRAY(ARRAY) sizeof(ARRAY)/sizeof(ARRAY[0])
+
+#if defined(ARDUINO) && ARDUINO >= 100
+#define printByte(args)  write(args);
+#else
+#define printByte(args)  print(args,BYTE);
+#endif
+
 #define DEBUG
 #define SERVO
-#define LCD
 
 #ifdef DEBUG
  #define DEBUG_PRINT(x)  Serial.print(x)
@@ -55,7 +62,7 @@ SoftwareSerial ESP8266(10, 11);
 
 // Feeder
 #define timeForOneTurn 2000 // ms
-Date_s date2feed[5];
+Date_s date2feed[6];
 int nb_meals = 4;
 // Breakfast at 7H
 // Lunch at 11H30
@@ -71,22 +78,43 @@ int timerId_sec;
 #ifdef SERVO
 Servo myservo;
 #endif
-const int buttonPin = 3;    // the number of the pushbutton pin
-const int ledPin = 1;       // the number of the LED pin
+const int button1 = 2;    // the number of the pushbutton pin
+const int button2 = 3;    // the number of the pushbutton pin
+const int button3 = 4;    // the number of the pushbutton pin
+const int ledPin = 1;        // the number of the LED pin
+bool flag_button1 = false;
+bool flag_button2 = false;
+bool flag_button3 = false;
 
 // LCD
-#ifdef LCD
 const int enLCD = 13;
 LiquidCrystal_I2C lcd(0x27,20,4);
-#endif
+uint8_t up[8]  = {0x00,0x04,0x0e,0x15,0x04,0x04,0x04,0x00};
+uint8_t down[8]  = {0x00,0x04,0x04,0x04,0x15,0x0e,0x04,0x00};
+
+// MENU
+typedef enum{
+  HOME = 0,
+  MENU,
+  DATETIME,
+  MEALS
+}mainState_type;
+mainState_type mainState = HOME; 
+String menuItems[] = {"DATE & TIME", "MEALS", "BACK"};
+char menuIndex = 0;
+char menuDisplayedIndex = 0;
+char menuTimeSettingsIndex = 1; // First digit of day value
+char menuMealsCursor = 2;
+char menuMealsIndex = 0;
 
 // Variables
 short wifiState = 0;
 bool flag_feed = true;
-bool flag_feed_force = false;
+bool flag_time = false;
 short timeleft = 0;
 Date date_t;
 Date_s next_date_s;
+int inactivity_counter = 0; // min
 
 void setup() {
   bool res = false;
@@ -99,17 +127,19 @@ void setup() {
 #endif
 
   // LCD setup
-#ifdef LCD
   pinMode(enLCD, OUTPUT);
   digitalWrite(enLCD, HIGH);
   lcd.init();
   lcd.backlight();
-#endif
+  lcd.createChar(0, up);
+  lcd.createChar(1, down);
   // RTC setup (I2C)
   Wire.begin();
   
   // IOs
-  pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(button1, INPUT_PULLUP);
+  pinMode(button2, INPUT_PULLUP);
+  pinMode(button3, INPUT_PULLUP);
   pinMode(ledPin, OUTPUT);
 
   // Connect to Wifi
@@ -137,12 +167,8 @@ void setup() {
     delay(1000);
   }
   
-#ifdef LCD
   printMainPage();
-#endif
-
-  // Interrupt on PushButon
-  attachInterrupt(digitalPinToInterrupt(buttonPin), ISR_feed, FALLING);
+  
   // Timer setup
   timerId_time = timer.setInterval(60000, ISR_time); // Every 1 min
   timerId_sec = timer.setInterval(500, ISR_sec); // Every 500ms
@@ -166,52 +192,277 @@ void setupDefaultFeeder(void){
 }
 
 void loop() {
-  if(flag_feed || flag_feed_force){
-    timer.disable(timerId_sec);
-    timer.disable(timerId_time);
-    
-    // Feed the cat
-#ifdef LCD
-    printTime2Eat();
-#endif
-    digitalWrite(ledPin, HIGH);
-    feedTheCat(next_date_s.nbrev);
-    digitalWrite(ledPin, LOW);
+  // Detect button push
+  ISR_button1();
+  ISR_button2();
+  ISR_button3();
 
-    // If not connected, try to reconnect
-    if(!wifiState) wifiState = connect2Wifi(false);
-    
-    // If connected to the internet
-    if(wifiState){
-      String log_str = "?code=1&quantity=";
-      log_str += String(next_date_s.nbrev);
-      // Send log to server
-      log2PI(log_str);
-      // Get new schedule from server
-      if(flag_feed){
-        bool res = getScheduleFromRaspberry();
-        delay(1000); // To let the message on display
-        // If first meal of monday has been served, update RTC time
-        if((next_date_s.date.heures == date2feed[0].date.heures) && (next_date_s.date.minutes == date2feed[0].date.minutes) && date_t.jourDeLaSemaine == 1){
-          res = getNetworkTime(&date_t);
-          delay(1000); // To let the message on display
-          if (res) writeToRTC(&date_t);
-        }
+  // Wake-up the screen if one button is pushed
+  if(flag_button1 || flag_button2 || flag_button3){
+    inactivity_counter = 0;
+    lcd.backlight();
+  }
+  
+  switch(mainState){
+    case HOME:{
+      // Sleep after N min of no user interaction
+      if(inactivity_counter >= 2){
+        lcd.noBacklight();
       }
+      
+      // Manage 1-min ISR flag
+      if(flag_time){
+        if(timeleft <= 0){
+          // Ask for feed
+          flag_feed = true;
+        }
+        // Update Time
+        readFromRTC(&date_t);
+        // Print on display
+        printMainPage();
+        flag_time = false;
+      }
+
+      // Manage food service
+      if(flag_feed){
+        timer.disable(timerId_sec);
+        //timer.disable(timerId_time);
+        
+        // Feed the cat
+        printTime2Eat();
+        digitalWrite(ledPin, HIGH);
+        feedTheCat(next_date_s.nbrev);
+        digitalWrite(ledPin, LOW);
+    
+        // If not connected, try to reconnect
+        if(!wifiState) wifiState = connect2Wifi(false);
+        
+        // If connected to the internet
+        if(wifiState){
+          String log_str = "?code=1&quantity=";
+          log_str += String(next_date_s.nbrev);
+          // Send log to server
+          log2PI(log_str);
+          // Get new schedule from server
+          if(flag_feed){
+            bool res = getScheduleFromRaspberry();
+            delay(1000); // To let the message on display
+            // If first meal of monday has been served, update RTC time
+            if((next_date_s.date.heures == date2feed[0].date.heures) && (next_date_s.date.minutes == date2feed[0].date.minutes) && date_t.jourDeLaSemaine == 1){
+              res = getNetworkTime(&date_t);
+              delay(1000); // To let the message on display
+              if (res) writeToRTC(&date_t);
+            }
+          }
+        }
+    
+        if(flag_feed) updateMeals(&next_date_s);
+        printMainPage();
+        flag_feed = false;
+        //timer.enable(timerId_time);
+        timer.enable(timerId_sec);
+      }
+
+      // Transition
+      if(flag_button2){
+        //timer.disable(timerId_time);
+        timer.disable(timerId_sec);
+        
+        mainState = MENU;
+        lcd.clear();
+        printMenu();
+        flag_button2 = false;
+      }
+      break;
+    }
+    
+    case MENU:{
+      // Up button
+      if(flag_button1){
+        if(menuIndex > 0)
+          menuIndex--;
+        else
+          menuIndex = SIZEOFARRAY(menuItems) -1;
+        // Manage auto scrolling
+        if(menuIndex - menuDisplayedIndex > 2) menuDisplayedIndex = menuIndex - 2;
+        else if(menuIndex - menuDisplayedIndex < 0) menuDisplayedIndex = menuIndex;
+        printMenu();
+        flag_button1 = false;
+      }
+      
+      // Validation button
+      else if(flag_button2){
+        // Last item is a Return
+        if(menuIndex == SIZEOFARRAY(menuItems)-1){
+          menuIndex = 0;
+          menuDisplayedIndex = 0;
+          mainState = HOME;
+          printMainPage();
+          timer.enable(timerId_sec);
+          //timer.enable(timerId_time);
+        }
+        else{
+          mainState = 2 + menuIndex;
+          switch(mainState){
+            case DATETIME:
+              lcd.blink();
+              lcd.clear();
+              printDateTimeMenu(&date_t);
+              break;
+           case MEALS:
+              lcd.blink();
+              lcd.clear();
+              printMealsMenu();
+              break;
+           default:
+              menuIndex = 0;
+              menuDisplayedIndex = 0;
+              mainState = HOME;
+              printMainPage();
+              timer.enable(timerId_sec);
+              break;
+          }
+        }
+        flag_button2 = false;
+      }
+
+      // Down button
+      else if(flag_button3){
+        if(menuIndex < (SIZEOFARRAY(menuItems)-1))
+          menuIndex++;
+        else
+          menuIndex = 0;
+        // Manage auto scrolling
+        if(menuIndex - menuDisplayedIndex > 2) menuDisplayedIndex = menuIndex - 2;
+        else if(menuIndex - menuDisplayedIndex < 0) menuDisplayedIndex = menuIndex;
+        printMenu();
+        flag_button3 = false;
+      }
+      break;
     }
 
-    if(flag_feed) updateMeals(&next_date_s);
-    
-#ifdef LCD
-    printMainPage();
-#endif
+    case DATETIME:{
+      // Down button
+      if(flag_button1){
+        if(menuTimeSettingsIndex == 1){
+          if(--date_t.jour == 0) date_t.jour = 31;
+        }
+        else if(menuTimeSettingsIndex == 4){
+          if(--date_t.mois == 0) date_t.mois = 12;
+        }
+        else if(menuTimeSettingsIndex == 7){
+          if(--date_t.annee == 0) date_t.annee = 99;
+        }
+        if(menuTimeSettingsIndex == 16){
+          if(--date_t.heures == 255) date_t.heures = 23;
+        }
+        else if(menuTimeSettingsIndex == 19){
+          if(--date_t.minutes == 255) date_t.minutes = 59;
+        }
+        printDateTimeMenu(&date_t);
+        flag_button1 = false;
+      }
+      
+      // Next value button
+      else if(flag_button2){
+        flag_button2 = false;
+        if(menuTimeSettingsIndex == 1) menuTimeSettingsIndex = 4;
+        else if(menuTimeSettingsIndex == 4) menuTimeSettingsIndex = 7;
+        else if(menuTimeSettingsIndex == 7) menuTimeSettingsIndex = 16;
+        else if(menuTimeSettingsIndex == 16) menuTimeSettingsIndex = 19;
+        else if(menuTimeSettingsIndex == 19){
+          // Write new time settings to RTC
+          writeToRTC(&date_t);
+          // Reset context for next entry
+          menuTimeSettingsIndex = 1;
+          lcd.noBlink();
+          lcd.clear();
+          // Set new state
+          mainState = MENU;
+          printMenu();
+          break;
+        }
+        printDateTimeMenu(&date_t);
+      }
 
-    flag_feed = false;
-    flag_feed_force = false;
-    timer.enable(timerId_time);
-    timer.enable(timerId_sec);
+      // Up button
+      else if(flag_button3){
+        if(menuTimeSettingsIndex == 1){
+          if(++date_t.jour == 32) date_t.jour = 1;
+        }
+        else if(menuTimeSettingsIndex == 4){
+          if(++date_t.mois == 13) date_t.mois = 1;
+        }
+        else if(menuTimeSettingsIndex == 7){
+          if(++date_t.annee == 100) date_t.annee = 0;
+        }
+        if(menuTimeSettingsIndex == 16){
+          if(++date_t.heures == 24) date_t.heures = 0;
+        }
+        else if(menuTimeSettingsIndex == 19){
+          if(++date_t.minutes == 60) date_t.minutes = 0;
+        }
+        printDateTimeMenu(&date_t);
+        flag_button3 = false;
+      }
+      break;
+    }
+
+    case MEALS:{
+      // Down button
+      if(flag_button1){
+        flag_button1 = false;
+        if(menuMealsCursor == 2){
+          if(--date2feed[menuMealsIndex].date.heures == 255) date2feed[menuMealsIndex].date.heures = 23;
+        }
+        else if(menuMealsCursor == 5){
+          if(--date2feed[menuMealsIndex].date.minutes == 255) date2feed[menuMealsIndex].date.minutes = 59;
+        }
+        else if(menuMealsCursor == 7){
+          if(--date2feed[menuMealsIndex].nbrev < 0) date2feed[menuMealsIndex].nbrev = 9;
+        }
+        printMealsMenu();
+      }
+      
+      // Next value button
+      else if(flag_button2){
+        flag_button2 = false;
+        
+        if(menuMealsCursor == 2) menuMealsCursor = 5;
+        else if(menuMealsCursor == 5) menuMealsCursor = 7;
+        else if(menuMealsCursor == 7){
+          menuMealsCursor = 2;
+          if(++menuMealsIndex == SIZEOFARRAY(date2feed)){
+            menuMealsIndex = 0;
+            lcd.noBlink();
+            lcd.clear();
+            // Set new state
+            mainState = MENU;
+            printMenu();
+            break;
+          }
+        }
+        printMealsMenu();
+      }
+
+      // Up button
+      else if(flag_button3){
+        flag_button3 = false;
+        if(menuMealsCursor == 2){
+          if(++date2feed[menuMealsIndex].date.heures == 24) date2feed[menuMealsIndex].date.heures = 0;
+        }
+        else if(menuMealsCursor == 5){
+          if(++date2feed[menuMealsIndex].date.minutes == 60) date2feed[menuMealsIndex].date.minutes = 0;
+        }
+        else if(menuMealsCursor == 7){
+          if(++date2feed[menuMealsIndex].nbrev == 10) date2feed[menuMealsIndex].nbrev = 0;
+        }
+        printMealsMenu();
+      }
+      break;
+    }
   }
-
+  
   timer.run();
 }
 
@@ -241,35 +492,37 @@ void updateMeals(Date_s* date_s){
   }
 }
 
-void ISR_feed(void){
-  if(digitalRead(buttonPin) == 0){
+void ISR_button1(void){
+  if(digitalRead(button1) == 0){
     delay(100);
-    if(digitalRead(buttonPin) == 0) flag_feed_force = true;
+    if(digitalRead(button1) == 0) flag_button1 = true;
+  }
+}
+
+void ISR_button2(void){
+  if(digitalRead(button2) == 0){
+    delay(100);
+    if(digitalRead(button2) == 0) flag_button2 = true;
+  }
+}
+
+void ISR_button3(void){
+  if(digitalRead(button3) == 0){
+    delay(100);
+    if(digitalRead(button3) == 0) flag_button3 = true;
   }
 }
 
 /* ISR_time is called every 1 min */
 void ISR_time(void){
+  flag_time = true;
   // Decrementes time left
   timeleft--;
-  if(timeleft <= 0){
-    // Ask for feed
-    flag_feed = true;
-  }
-  // Update Time
-  readFromRTC(&date_t);
-
-  // Print on display
-#ifdef LCD
-  printMainPage();
-#endif
-  return;
+  inactivity_counter++;
 }
 
 void ISR_sec(void){
-#ifdef LCD
   blinkColon();
-#endif
 }
 
 void feedTheCat(const short revolutions){
@@ -296,13 +549,11 @@ void feedTheCat(const short revolutions){
  *                              WIFI FUNCTIONS                                *
  ******************************************************************************/
 short connect2Wifi(bool reset){
-#ifdef LCD
   lcd.clear();
   lcd.setCursor(8,1);
   lcd.print("WIFI");
   lcd.setCursor(4,2);
   lcd.print("CONNECTION...");
-#endif
 
   bool state = false;
   if(reset) envoieAuESP8266("AT+RST");
@@ -316,7 +567,6 @@ short connect2Wifi(bool reset){
   envoieAuESP8266("AT+CIPMUX=0");
   res = recoitDuESP8266(2000L, -1);
 
-#ifdef LCD
   lcd.clear();
   lcd.setCursor(2,1);
   lcd.print("WIFI CONNECTION");
@@ -328,7 +578,6 @@ short connect2Wifi(bool reset){
       lcd.setCursor(7,2);
       lcd.print("FAILED");
   }
-#endif
 
   return state;
 }
@@ -375,11 +624,9 @@ bool recoitDuESP8266(const long int timeout, char start_char){
 }
 
 short getNetworkTime(Date* date){
-#ifdef LCD
   lcd.clear();
   lcd.setCursor(1,1);
   lcd.print("TIME & DATE UPDATE");
-#endif
   String request = "GET ";
   request += GETtime; // Get settings
   request += HTTP;
@@ -416,7 +663,6 @@ short getNetworkTime(Date* date){
     res = false;
   }
 
-#ifdef LCD
   if(res){ // Read from Raspberry Pi
     lcd.setCursor(5,2);
     lcd.print("SUCCEEDED");
@@ -425,7 +671,6 @@ short getNetworkTime(Date* date){
     lcd.setCursor(7,2);
     lcd.print("FAILED");
   }
-#endif
 
   return res;
 }
@@ -451,11 +696,9 @@ bool log2PI(String msg){
 }
 
 bool getScheduleFromRaspberry(void){
-#ifdef LCD
   lcd.clear();
   lcd.setCursor(2,1);
   lcd.print("SCHEDULE UPDATE");
-#endif
 
   String request = "GET ";
   request += GETschedule; // Get settings
@@ -492,8 +735,6 @@ bool getScheduleFromRaspberry(void){
     DEBUG_PRINTLN("JSON not received.");
     res = false;
   }
-
-#ifdef LCD
     if(res){ // Read from Raspberry Pi
       lcd.setCursor(5,2);
       lcd.print("SUCCEEDED");
@@ -502,7 +743,6 @@ bool getScheduleFromRaspberry(void){
       lcd.setCursor(7,2);
       lcd.print("FAILED");
       }
-#endif
 
   return res;
 }
@@ -532,34 +772,33 @@ bool sendRequest(String request, bool waitForJSON){
 /******************************************************************************
  *                              LCD FUNCTIONS                                 *
  ******************************************************************************/
-#ifdef LCD
-void printDateAndHour(Date *date) {
-  lcd.setCursor(0, 0); // Place le curseur à (0,0)
+void printDateAndHour(Date *date, char row) {
+  lcd.setCursor(0, row); // Place le curseur à (0,0)
   lcd.print(date->jour / 10, DEC);// Affichage du jour sur deux caractéres
-  lcd.setCursor(1, 0);
+  lcd.setCursor(1, row);
   lcd.print(date->jour % 10, DEC);
-  lcd.setCursor(2, 0);
+  lcd.setCursor(2, row);
   lcd.print("/");
-  lcd.setCursor(3, 0);
+  lcd.setCursor(3, row);
   lcd.print(date->mois / 10, DEC);// Affichage du mois sur deux caractéres
-  lcd.setCursor(4, 0);
+  lcd.setCursor(4, row);
   lcd.print(date->mois % 10, DEC);
-  lcd.setCursor(5, 0);
+  lcd.setCursor(5, row);
   lcd.print("/");
-  lcd.setCursor(6, 0);
+  lcd.setCursor(6, row);
   lcd.print(date->annee / 10, DEC);// Affichage de l'année sur deux caractéres
-  lcd.setCursor(7, 0);
+  lcd.setCursor(7, row);
   lcd.print(date->annee % 10, DEC);
   
-  lcd.setCursor(15, 0);
+  lcd.setCursor(15, row);
   lcd.print(date->heures / 10, DEC); // Affichage de l'heure sur deux caractéres
-  lcd.setCursor(16, 0);
+  lcd.setCursor(16, row);
   lcd.print(date->heures % 10, DEC);
-  lcd.setCursor(17, 0);
+  lcd.setCursor(17, row);
   lcd.print(":");
-  lcd.setCursor(18, 0);
+  lcd.setCursor(18, row);
   lcd.print(date->minutes / 10, DEC); // Affichage des minutes sur deux caractéres
-  lcd.setCursor(19, 0);
+  lcd.setCursor(19, row);
   lcd.print(date->minutes % 10, DEC);
 }
 
@@ -606,11 +845,82 @@ void printTimeLeft(void){
 
 void printMainPage(){
   lcd.clear();
-  printDateAndHour(&date_t);
+  printDateAndHour(&date_t, 0);
   printTimeLeft();
   printWifiState(wifiState);
 }
-#endif
+
+void printMenu(){
+  lcd.clear();
+  lcd.home();
+  lcd.print("------- MENU -------");
+  char row_index = 1;
+  for(int i = menuDisplayedIndex ; i < SIZEOFARRAY(menuItems) ; i++){
+     if(menuIndex == i){
+        lcd.setCursor((20 - (menuItems[i].length()-1))/2 - 2, row_index);
+        lcd.print("> ");
+        lcd.print(menuItems[i]);
+        lcd.print(" <");
+     }
+     else{
+        lcd.setCursor((20 - (menuItems[i].length()-1))/2, row_index);
+        lcd.print(menuItems[i]);
+     }
+     if(++row_index > 3) break;
+  }
+  // Print up and down char
+  if(menuDisplayedIndex > 0){
+    lcd.setCursor(0, 1);
+    lcd.printByte(0);
+  }
+  if(SIZEOFARRAY(menuItems) - menuDisplayedIndex > 3){
+    lcd.setCursor(0, 3);
+    lcd.printByte(1);
+  }
+}
+
+void printDateTimeMenu(Date *date){
+  lcd.home();
+  lcd.print("---- DATE & TIME ---");
+  printDateAndHour(date, 2);
+  lcd.setCursor(menuTimeSettingsIndex, 2);
+}
+
+void printMealsMenu(){
+  lcd.home();
+  lcd.print("------- MEALS ------");
+  char row_index = 1;
+  char col_index = 0;
+
+  for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){
+    lcd.setCursor(col_index+1, row_index);
+    lcd.print(date2feed[i].date.heures / 10, DEC); // Affichage de l'heure sur deux caractéres
+    lcd.setCursor(col_index+2, row_index);
+    lcd.print(date2feed[i].date.heures % 10, DEC);
+    lcd.setCursor(col_index+3, row_index);
+    lcd.print(":");
+    lcd.setCursor(col_index+4, row_index);
+    lcd.print(date2feed[i].date.minutes / 10, DEC); // Affichage des minutes sur deux caractéres
+    lcd.setCursor(col_index+5, row_index);
+    lcd.print(date2feed[i].date.minutes % 10, DEC);
+    lcd.setCursor(col_index+6, row_index);
+    lcd.print("[");
+    lcd.setCursor(col_index+7, row_index);
+    lcd.print(date2feed[i].nbrev, DEC); // Affichage du nb de revolutions
+    lcd.setCursor(col_index+8, row_index);
+    lcd.print("]");
+
+    if(i%2 == 0){
+      col_index += 10;
+    }
+    else{
+      col_index = 0;
+      row_index++;
+    }
+  }
+  
+  lcd.setCursor((menuMealsIndex%2)*10+menuMealsCursor, 1+(menuMealsIndex/2));
+}
 /******************************************************************************
  *                              RTC FUNCTIONS                                 *
  ******************************************************************************/
