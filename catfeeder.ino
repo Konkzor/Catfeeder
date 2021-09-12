@@ -252,6 +252,10 @@ void loop() {
       }
 
       // Transition
+      if(flag_button1 || flag_button3){ // Discard button 1 and 3
+        flag_button1 = false;
+        flag_button3 = false;
+      }
       if(flag_button2){
         //timer.disable(timerId_time);
         timer.disable(timerId_sec);
@@ -265,6 +269,15 @@ void loop() {
     }
     
     case MENU:{
+      // Go HOME after N min of inactivity
+      if(inactivity_counter >= 1){
+        inactivity_counter = 0;
+        menuIndex = 0;
+        menuDisplayedIndex = 0;
+        mainState = HOME;
+        printMainPage();
+        timer.enable(timerId_sec);
+      }
       // Up button
       if(flag_button1){
         if(menuIndex > 0)
@@ -334,6 +347,15 @@ void loop() {
     }
 
     case DATETIME:{
+      // Go HOME after N min of inactivity
+      if(inactivity_counter >= 1){
+        inactivity_counter = 0;
+        menuIndex = 0;
+        menuDisplayedIndex = 0;
+        mainState = HOME;
+        printMainPage();
+        timer.enable(timerId_sec);
+      }
       // Down button
       if(flag_button1){
         if(menuTimeSettingsIndex == 1){
@@ -401,6 +423,15 @@ void loop() {
     }
 
     case MEALS:{
+      // Go HOME after N min of inactivity
+      if(inactivity_counter >= 1){
+        inactivity_counter = 0;
+        menuIndex = 0;
+        menuDisplayedIndex = 0;
+        mainState = HOME;
+        printMainPage();
+        timer.enable(timerId_sec);
+      }
       // Down button
       if(flag_button1){
         flag_button1 = false;
