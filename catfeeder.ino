@@ -1,3 +1,4 @@
+#include <EEPROM.h>
 #include <Servo.h>
 #include <Wire.h>
 #include <SimpleTimer.h>
@@ -159,7 +160,7 @@ void setup() {
   // Setup feeder schedule
   next_date_s.date = date_t;
   next_date_s.nbrev = 2;
-  setupDefaultFeeder(); // Default
+  getMealsFromEEPROM();
   
   // Get schedule from Raspberry Pi
   if(wifiState){
@@ -172,23 +173,6 @@ void setup() {
   // Timer setup
   timerId_time = timer.setInterval(60000, ISR_time); // Every 1 min
   timerId_sec = timer.setInterval(500, ISR_sec); // Every 500ms
-}
-
-void setupDefaultFeeder(void){
-  nb_meals = 4;
-  // Time setups
-  date2feed[0].date.heures = 7;
-  date2feed[0].date.minutes = 0;
-  date2feed[0].nbrev = 2;
-  date2feed[1].date.heures = 12;
-  date2feed[1].date.minutes = 0;
-  date2feed[1].nbrev = 2;
-  date2feed[2].date.heures = 17;
-  date2feed[2].date.minutes = 0;
-  date2feed[2].nbrev = 1;
-  date2feed[3].date.heures = 21;
-  date2feed[3].date.minutes = 0;
-  date2feed[3].nbrev = 2;
 }
 
 void loop() {
@@ -433,6 +417,9 @@ void loop() {
         else if(menuMealsCursor == 7){
           menuMealsCursor = 2;
           if(++menuMealsIndex == SIZEOFARRAY(date2feed)){
+            // Save new settings
+            setMealsToEEPROM();
+            // Reset context
             menuMealsIndex = 0;
             lcd.noBlink();
             lcd.clear();
@@ -963,4 +950,51 @@ byte bcd2dec(byte bcd) {
  
 byte dec2bcd(byte dec) {
   return ((dec / 10 * 16) + (dec % 10));
+}
+
+/******************************************************************************
+ *                              EEPROM FUNCTIONS                              *
+ ******************************************************************************/
+void getMealsFromEEPROM(void){
+  int value = 0;
+  int address = 0;
+  
+  // Read first address to determine if EEPROM has already be written to
+  value = EEPROM.read(address);
+  if(value != -1){ // EEPROM has already be written
+    for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){
+      date2feed[i].date.heures = EEPROM.read(address++);
+      date2feed[i].date.minutes = EEPROM.read(address++);
+      date2feed[i].nbrev = EEPROM.read(address++);
+      Serial.println(date2feed[i].date.heures);
+      Serial.println(date2feed[i].date.minutes);
+      Serial.println(date2feed[i].nbrev);
+    }
+  }
+  else{ // EEPROM never modified
+    // Default setup (4 meals)
+    date2feed[0].date.heures = 7;
+    date2feed[0].date.minutes = 0;
+    date2feed[0].nbrev = 2;
+    date2feed[1].date.heures = 12;
+    date2feed[1].date.minutes = 0;
+    date2feed[1].nbrev = 2;
+    date2feed[2].date.heures = 17;
+    date2feed[2].date.minutes = 0;
+    date2feed[2].nbrev = 1;
+    date2feed[3].date.heures = 21;
+    date2feed[3].date.minutes = 0;
+    date2feed[3].nbrev = 2;
+
+    setMealsToEEPROM();
+  }
+}
+
+void setMealsToEEPROM(void){
+  int address = 0;
+  for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){
+    EEPROM.update(address++, date2feed[i].date.heures);
+    EEPROM.update(address++, date2feed[i].date.minutes);
+    EEPROM.update(address++, date2feed[i].nbrev);
+  }
 }
