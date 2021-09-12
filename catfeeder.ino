@@ -50,25 +50,21 @@ typedef struct{
 #define DS1307_ADDRESS 0x68
 
 // WIFI
-#define NomduReseauWifi "Livebox-A536"
-#define MotDePasse "4PGK3DGFrhQ5ZqnoWY"
-#define IPraspberry "192.168.1.51"
-#define PORTraspberry "5000"
-#define GETschedule "/catfeeder/schedule"
-#define GETlog "/catfeeder/logger"
+typedef struct{
+  bool enable;
+  unsigned char accesspoint[17];
+  unsigned char key[18];
+  char state;
+}Network_s;
+Network_s myNetwork;
+
 #define GETtime "/time"
 #define HTTP " HTTP/1.1\r\n"
-
 SoftwareSerial ESP8266(10, 11);
 
 // Feeder
 #define timeForOneTurn 2000 // ms
 Date_s date2feed[6];
-int nb_meals = 4;
-// Breakfast at 7H
-// Lunch at 11H30
-// Break at 17H
-// Dinner at 21H
 
 // Timer
 SimpleTimer timer;
@@ -98,18 +94,22 @@ typedef enum{
   HOME = 0,
   MENU,
   DATETIME,
-  MEALS
+  MEALS,
+  NETWORK
 }mainState_type;
 mainState_type mainState = HOME; 
-String menuItems[] = {"DATE & TIME", "MEALS", "BACK"};
+String menuItems[] = {"DATE & TIME", "MEALS", "NETWORK", "BACK"};
 char menuIndex = 0;
 char menuDisplayedIndex = 0;
 char menuTimeSettingsIndex = 1; // First digit of day value
 char menuMealsCursor = 2;
 char menuMealsIndex = 0;
+char menuNetworkColCursor = 14;
+char menuNetworkRowCursor = 1;
+
 
 // Variables
-short wifiState = 0;
+bool flag_updateDisplay = false;
 bool flag_feed = true;
 bool flag_time = false;
 short timeleft = 0;
@@ -144,12 +144,14 @@ void setup() {
   pinMode(ledPin, OUTPUT);
 
   // Connect to Wifi
-  wifiState = connect2Wifi(true);
-  if(wifiState) log2PI("?code=0");
-  delay(2000);
+  getNetworkSettingsFromEEPROM();
+  if(myNetwork.enable){
+    myNetwork.state = connect2Wifi(true);
+    delay(2000);
+  }
 
   //RTC synchronization
-  if(wifiState){
+  if(myNetwork.state){
     res = getNetworkTime(&date_t);
     if (res) writeToRTC(&date_t);
     else readFromRTC(&date_t);
@@ -161,12 +163,6 @@ void setup() {
   next_date_s.date = date_t;
   next_date_s.nbrev = 2;
   getMealsFromEEPROM();
-  
-  // Get schedule from Raspberry Pi
-  if(wifiState){
-    res = getScheduleFromRaspberry();
-    delay(1000);
-  }
   
   printMainPage();
   
@@ -219,21 +215,16 @@ void loop() {
         digitalWrite(ledPin, LOW);
     
         // If not connected, try to reconnect
-        if(!wifiState) wifiState = connect2Wifi(false);
+        if(myNetwork.enable && !myNetwork.state) myNetwork.state = connect2Wifi(false);
         
         // If connected to the internet
-        if(wifiState){
-          String log_str = "?code=1&quantity=";
-          log_str += String(next_date_s.nbrev);
-          // Send log to server
-          log2PI(log_str);
+        if(myNetwork.state){
           // Get new schedule from server
           if(flag_feed){
-            bool res = getScheduleFromRaspberry();
             delay(1000); // To let the message on display
             // If first meal of monday has been served, update RTC time
             if((next_date_s.date.heures == date2feed[0].date.heures) && (next_date_s.date.minutes == date2feed[0].date.minutes) && date_t.jourDeLaSemaine == 1){
-              res = getNetworkTime(&date_t);
+              bool res = getNetworkTime(&date_t);
               delay(1000); // To let the message on display
               if (res) writeToRTC(&date_t);
             }
@@ -283,7 +274,6 @@ void loop() {
           mainState = HOME;
           printMainPage();
           timer.enable(timerId_sec);
-          //timer.enable(timerId_time);
         }
         else{
           mainState = 2 + menuIndex;
@@ -297,6 +287,11 @@ void loop() {
               lcd.blink();
               lcd.clear();
               printMealsMenu();
+              break;
+           case NETWORK:
+              lcd.blink();
+              lcd.clear();
+              printNetworkMenu();
               break;
            default:
               menuIndex = 0;
@@ -448,6 +443,90 @@ void loop() {
       }
       break;
     }
+
+    case NETWORK:{
+      // Go HOME after N min of inactivity
+      if(inactivity_counter >= 1){
+        inactivity_counter = 0;
+        menuIndex = 0;
+        menuDisplayedIndex = 0;
+        mainState = HOME;
+        printMainPage();
+        timer.enable(timerId_sec);
+      }
+      if(flag_button1){
+        flag_button1 = false;
+        if(menuNetworkRowCursor == 1){
+          myNetwork.enable = !myNetwork.enable;
+        }
+        else if(menuNetworkRowCursor == 2){
+          if(--myNetwork.accesspoint[menuNetworkColCursor-3] < 0x20) myNetwork.accesspoint[menuNetworkColCursor-3] = 0x7F; // Discard useless characters
+        }
+        else if(menuNetworkRowCursor == 3){
+          if(--myNetwork.key[menuNetworkColCursor-2] < 0x20) myNetwork.key[menuNetworkColCursor-2] = 0x7F; // Discard useless characters
+        }
+        printNetworkMenu();
+      }
+      
+      else if(flag_button2){
+        flag_button2 = false;
+        
+        if(menuNetworkRowCursor == 1){
+          if(!myNetwork.enable){
+            // Save new settings
+            setNetworkSettingsToEEPROM();
+            // Reset context
+            menuNetworkRowCursor = 1;
+            menuNetworkColCursor = 14;
+            lcd.noBlink();
+            lcd.clear();
+            // Set new state
+            mainState = MENU;
+            printMenu();
+            break;
+          }
+          menuNetworkRowCursor = 2;
+          menuNetworkColCursor = 3;
+        }
+        else if(menuNetworkRowCursor == 2){
+          if(++menuNetworkColCursor == 20){
+            menuNetworkRowCursor = 3;
+            menuNetworkColCursor = 2;
+          }
+        }
+        else if(menuNetworkRowCursor == 3){
+          if(++menuNetworkColCursor == 20){
+            // Save new settings
+            setNetworkSettingsToEEPROM();
+            // Reset context
+            menuNetworkRowCursor = 1;
+            menuNetworkColCursor = 14;
+            lcd.noBlink();
+            lcd.clear();
+            // Set new state
+            mainState = MENU;
+            printMenu();
+            break;
+          }
+        }
+        printNetworkMenu();
+      }
+      
+      else if(flag_button3){
+        flag_button3 = false;
+        if(menuNetworkRowCursor == 1){
+          myNetwork.enable = !myNetwork.enable;
+        }
+        else if(menuNetworkRowCursor == 2){
+          if(++myNetwork.accesspoint[menuNetworkColCursor-3] >= 0x80) myNetwork.accesspoint[menuNetworkColCursor-3] = 0x20; // Discard useless characters
+        }
+        else if(menuNetworkRowCursor == 3){
+          if(++myNetwork.key[menuNetworkColCursor-2] >= 0x80) myNetwork.key[menuNetworkColCursor-2] = 0x20; // Discard useless characters
+        }
+        printNetworkMenu();
+      }
+      break;
+    }
   }
   
   timer.run();
@@ -548,7 +627,9 @@ short connect2Wifi(bool reset){
   bool res = recoitDuESP8266(2000L, -1);
   envoieAuESP8266("AT+CWMODE=1"); // WIFI MODE STATION
   res = recoitDuESP8266(5000L, -1);
-  envoieAuESP8266("AT+CWJAP=\"" + String(NomduReseauWifi) + "\",\"" + String(MotDePasse) + "\""); // JOIN ACCESS POINT
+  String ap = myNetwork.accesspoint;
+  String key = myNetwork.key;
+  envoieAuESP8266("AT+CWJAP=\"" + ap + "\",\"" + key + "\""); // JOIN ACCESS POINT
   res = recoitDuESP8266(7000L, -1);
   state = checkWiFi();
   envoieAuESP8266("AT+CIPMUX=0");
@@ -834,7 +915,8 @@ void printMainPage(){
   lcd.clear();
   printDateAndHour(&date_t, 0);
   printTimeLeft();
-  printWifiState(wifiState);
+  if(myNetwork.enable)
+    printWifiState(myNetwork.state);
 }
 
 void printMenu(){
@@ -908,6 +990,40 @@ void printMealsMenu(){
   
   lcd.setCursor((menuMealsIndex%2)*10+menuMealsCursor, 1+(menuMealsIndex/2));
 }
+
+void printNetworkMenu(){
+  lcd.home();
+  lcd.print("------ NETWORK -----");
+  lcd.setCursor(0,1);
+  lcd.print("WIFI STATE:");
+  lcd.setCursor(14,1);
+  if(myNetwork.enable){
+    char curs = 3;
+    lcd.print("ON ");
+    lcd.setCursor(0,2);
+    lcd.print("AP:");
+    for(int i = 0 ; i < SIZEOFARRAY(myNetwork.accesspoint); i++){
+      lcd.setCursor(curs++, 2);
+      lcd.printByte(myNetwork.accesspoint[i]);
+    }
+    lcd.setCursor(0,3);
+    lcd.print("K:");
+    curs = 2;
+    for(int i = 0 ; i < SIZEOFARRAY(myNetwork.key); i++){
+      lcd.setCursor(curs++, 3);
+      lcd.printByte(myNetwork.key[i]);
+    }
+  }
+  else{
+    lcd.print("OFF");
+    lcd.setCursor(0,2);
+    lcd.print("                    ");
+    lcd.setCursor(0,3);
+    lcd.print("                    ");
+  }
+  
+  lcd.setCursor(menuNetworkColCursor, menuNetworkRowCursor);
+}
 /******************************************************************************
  *                              RTC FUNCTIONS                                 *
  ******************************************************************************/
@@ -966,9 +1082,6 @@ void getMealsFromEEPROM(void){
       date2feed[i].date.heures = EEPROM.read(address++);
       date2feed[i].date.minutes = EEPROM.read(address++);
       date2feed[i].nbrev = EEPROM.read(address++);
-      Serial.println(date2feed[i].date.heures);
-      Serial.println(date2feed[i].date.minutes);
-      Serial.println(date2feed[i].nbrev);
     }
   }
   else{ // EEPROM never modified
@@ -996,5 +1109,40 @@ void setMealsToEEPROM(void){
     EEPROM.update(address++, date2feed[i].date.heures);
     EEPROM.update(address++, date2feed[i].date.minutes);
     EEPROM.update(address++, date2feed[i].nbrev);
+  }
+}
+
+void getNetworkSettingsFromEEPROM(void){
+  int address = 18;
+  // Enable
+  char enable = EEPROM.read(address);
+  if((enable == 0) || (enable == -1)){
+    myNetwork.enable = false;
+  }
+  else{
+    myNetwork.enable = true;
+  }
+  // Accespoint and key
+  address = 19;
+  for(int i = 0 ; i < SIZEOFARRAY(myNetwork.accesspoint); i++){
+    myNetwork.accesspoint[i] = EEPROM.read(address++);
+    if(myNetwork.accesspoint[i] >= 0x80) myNetwork.accesspoint[i] = 0x20; // Discard useless characters
+  }
+  for(int i = 0 ; i < SIZEOFARRAY(myNetwork.key); i++){
+    myNetwork.key[i] = EEPROM.read(address++);
+    if(myNetwork.key[i] >= 0x80) myNetwork.key[i] = 0x20; // Discard useless characters
+  }
+}
+
+void setNetworkSettingsToEEPROM(void){
+  int address = 18;
+  // Enable
+  EEPROM.update(address++, (myNetwork.enable ? 1 : 0));
+  // Accespoint and key
+  for(int i = 0 ; i < SIZEOFARRAY(myNetwork.accesspoint); i++){
+     EEPROM.update(address++, myNetwork.accesspoint[i]);
+  }
+  for(int i = 0 ; i < SIZEOFARRAY(myNetwork.key); i++){
+     EEPROM.update(address++, myNetwork.key[i]);
   }
 }
