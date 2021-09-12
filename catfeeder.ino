@@ -271,7 +271,7 @@ void loop() {
     
     case MENU:{
       // Go HOME after N min of inactivity
-      if(inactivity_counter >= 1){
+      if(inactivity_counter >= 2){
         inactivity_counter = 0;
         menuIndex = 0;
         menuDisplayedIndex = 0;
@@ -349,7 +349,7 @@ void loop() {
 
     case DATETIME:{
       // Go HOME after N min of inactivity
-      if(inactivity_counter >= 1){
+      if(inactivity_counter >= 2){
         inactivity_counter = 0;
         menuIndex = 0;
         menuDisplayedIndex = 0;
@@ -425,7 +425,7 @@ void loop() {
 
     case MEALS:{
       // Go HOME after N min of inactivity
-      if(inactivity_counter >= 1){
+      if(inactivity_counter >= 2){
         inactivity_counter = 0;
         menuIndex = 0;
         menuDisplayedIndex = 0;
@@ -492,7 +492,7 @@ void loop() {
 
     case NETWORK:{
       // Go HOME after N min of inactivity
-      if(inactivity_counter >= 1){
+      if(inactivity_counter >= 2){
         inactivity_counter = 0;
         menuIndex = 0;
         menuDisplayedIndex = 0;
