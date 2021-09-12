@@ -210,8 +210,9 @@ void loop() {
       
       // Manage time update on display
       if(flag_updateDisplay){
-        // Print on display
-        printMainPage();
+        // Update date, time and timeleft on display
+        printDateAndHour(&date_t, 0);
+        printTimeLeft();
         flag_updateDisplay = false;
       }
 
