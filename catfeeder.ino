@@ -42,7 +42,6 @@ typedef struct{
 
 typedef struct{
   Date date;
-  bool state; // 1 is done
   short nbrev; // revolution
 }Date_s;
 
@@ -178,16 +177,16 @@ void loop() {
   if(flag_time){
     // Update display if time is displayed
     flag_updateDisplay = true;
-    // Decrementes time left
-    timeleft--;
-    if(timeleft <= 0){
-      // Ask for feed
-      flag_feed = true;
-    }
     // Inactivity counter increment
     inactivity_counter++;
     // Update Time
     readFromRTC(&date_t);
+    // Update next meal every 1 min
+    updateMeals(&next_date_s);
+    if(timeleft <= 0){
+      // Ask for feed
+      flag_feed = true;
+    }
     flag_time = false;
   }
   
@@ -244,7 +243,9 @@ void loop() {
           }
         }
     
-        if(flag_feed) updateMeals(&next_date_s);
+        if(flag_feed){
+          updateMeals(&next_date_s);
+        }
         printMainPage();
         flag_feed = false;
         //timer.enable(timerId_time);
@@ -458,6 +459,7 @@ void loop() {
           if(++menuMealsIndex == SIZEOFARRAY(date2feed)){
             // Save new settings
             setMealsToEEPROM();
+            updateMeals(&next_date_s);
             // Reset context
             menuMealsIndex = 0;
             lcd.noBlink();
@@ -577,28 +579,52 @@ void loop() {
 }
 
 void updateMeals(Date_s* date_s){
-  // State setup
-  for(int i = 0 ; i < nb_meals ; i++){
-    if(60*date_s->date.heures+date_s->date.minutes >= 60*date2feed[i].date.heures + date2feed[i].date.minutes){ // Meal is past
-      date2feed[i].state = 1; // Served !
-      timeleft = 0;
-    }
-    else{
-      date2feed[i].state = 0;
-      timeleft = (date2feed[i].date.heures - date_t.heures)*60 + (date2feed[i].date.minutes - date_t.minutes);
-      *date_s = date2feed[i]; // For next time
+  Date_s first_meal;
+  bool no_meal = true;
+
+  // Initialise first_meal value and detect if no meal is activaed
+  for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){
+    if(date2feed[i].nbrev != 0){
+      first_meal = date2feed[i];
+      no_meal = false;
       break;
     }
   }
 
-  // If all meal are served, then reload all of them and set next meal as breakfast
-  if (timeleft == 0){
-    for(int i = 0 ; i < nb_meals ; i++){
-       date2feed[i].state = 0; // Non-served !
+  // TODO Manage situation where no meal is activated
+  if(no_meal){
+    return;
+  }
+  
+  // Get the next meal
+  timeleft = 24*60; // By default (the max value)
+  short timeleft_temp;
+  for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){ 
+    if((date2feed[i].nbrev == 0) || // Meal is not activated, discard it
+      (60*date_t.heures+date_t.minutes >= 60*date2feed[i].date.heures + date2feed[i].date.minutes)) // Meal is past
+      continue;
+    else{ // Meal is later in the day
+      timeleft_temp = (date2feed[i].date.heures - date_t.heures)*60 + (date2feed[i].date.minutes - date_t.minutes);
+      if(timeleft_temp < timeleft){
+        timeleft = timeleft_temp;
+        *date_s = date2feed[i];
+      }
     }
-    timeleft = (24 - date_t.heures + date2feed[0].date.heures)*60 + (0 - date_t.minutes + date2feed[0].date.minutes);
+  }
+  
+  // If all meal are served, set next meal as first_meal
+  if (timeleft == 24*60){
+    // Found the first meal of the day
+    for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){
+      if(date2feed[i].nbrev == 0) // Meal is not activated, discard it
+        continue;
+      else if(60*date2feed[i].date.heures + date2feed[i].date.minutes < 60*first_meal.date.heures + first_meal.date.minutes){
+        first_meal = date2feed[i];
+      }
+    }
+    *date_s = first_meal;
+    timeleft = (24 - date_t.heures + date_s->date.heures)*60 + (0 - date_t.minutes + date_s->date.minutes);
     if (timeleft > 12*60) timeleft = 12*60;
-    *date_s = date2feed[0];
   }
 }
 
