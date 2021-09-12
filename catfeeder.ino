@@ -119,6 +119,17 @@ int inactivity_counter = 0; // min
 
 void setup() {
   bool res = false;
+
+  // IOs
+  pinMode(button1, INPUT_PULLUP);
+  pinMode(button2, INPUT_PULLUP);
+  pinMode(button3, INPUT_PULLUP);
+  pinMode(enLCD, OUTPUT);
+  pinMode(ledPin, OUTPUT);
+  
+  digitalWrite(ledPin, HIGH);
+  digitalWrite(enLCD, HIGH);
+  
   // ESP8266 baudrate setup
   ESP8266.begin(115200);
   
@@ -128,20 +139,12 @@ void setup() {
 #endif
 
   // LCD setup
-  pinMode(enLCD, OUTPUT);
-  digitalWrite(enLCD, HIGH);
   lcd.init();
   lcd.backlight();
   lcd.createChar(0, up);
   lcd.createChar(1, down);
   // RTC setup (I2C)
   Wire.begin();
-  
-  // IOs
-  pinMode(button1, INPUT_PULLUP);
-  pinMode(button2, INPUT_PULLUP);
-  pinMode(button3, INPUT_PULLUP);
-  pinMode(ledPin, OUTPUT);
 
   // Connect to Wifi
   getNetworkSettingsFromEEPROM();
