@@ -175,6 +175,22 @@ void setup() {
 }
 
 void loop() {
+  if(flag_time){
+    // Update display if time is displayed
+    flag_updateDisplay = true;
+    // Decrementes time left
+    timeleft--;
+    if(timeleft <= 0){
+      // Ask for feed
+      flag_feed = true;
+    }
+    // Inactivity counter increment
+    inactivity_counter++;
+    // Update Time
+    readFromRTC(&date_t);
+    flag_time = false;
+  }
+  
   // Detect button push
   ISR_button1();
   ISR_button2();
@@ -193,17 +209,11 @@ void loop() {
         lcd.noBacklight();
       }
       
-      // Manage 1-min ISR flag
-      if(flag_time){
-        if(timeleft <= 0){
-          // Ask for feed
-          flag_feed = true;
-        }
-        // Update Time
-        readFromRTC(&date_t);
+      // Manage time update on display
+      if(flag_updateDisplay){
         // Print on display
         printMainPage();
-        flag_time = false;
+        flag_updateDisplay = false;
       }
 
       // Manage food service
@@ -585,9 +595,6 @@ void ISR_button3(void){
 /* ISR_time is called every 1 min */
 void ISR_time(void){
   flag_time = true;
-  // Decrementes time left
-  timeleft--;
-  inactivity_counter++;
 }
 
 void ISR_sec(void){
