@@ -166,6 +166,9 @@ void setup() {
   next_date_s.date = date_t;
   next_date_s.nbrev = 2;
   getMealsFromEEPROM();
+  // Init timeleft until next meal
+  flag_feed = true;
+  updateMeal(&next_date_s);
   
   printMainPage();
   
@@ -183,11 +186,7 @@ void loop() {
     // Update Time
     readFromRTC(&date_t);
     // Update next meal every 1 min
-    updateMeals(&next_date_s);
-    if(timeleft <= 0){
-      // Ask for feed
-      flag_feed = true;
-    }
+    updateMeal(&next_date_s);
     flag_time = false;
   }
   
@@ -243,10 +242,6 @@ void loop() {
               if (res) writeToRTC(&date_t);
             }
           }
-        }
-    
-        if(flag_feed){
-          updateMeals(&next_date_s);
         }
         printMainPage();
         flag_feed = false;
@@ -461,7 +456,7 @@ void loop() {
           if(++menuMealsIndex == SIZEOFARRAY(date2feed)){
             // Save new settings
             setMealsToEEPROM();
-            updateMeals(&next_date_s);
+            updateMeal(&next_date_s);
             // Reset context
             menuMealsIndex = 0;
             lcd.noBlink();
@@ -580,7 +575,7 @@ void loop() {
   timer.run();
 }
 
-void updateMeals(Date_s* date_s){
+void updateMeal(Date_s* date_s){
   Date_s first_meal;
   bool no_meal = true;
 
@@ -603,11 +598,13 @@ void updateMeals(Date_s* date_s){
   short timeleft_temp;
   for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){ 
     if((date2feed[i].nbrev == 0) || // Meal is not activated, discard it
-      (60*date_t.heures+date_t.minutes >= 60*date2feed[i].date.heures + date2feed[i].date.minutes)) // Meal is past
+      (60*date_t.heures+date_t.minutes > 60*date2feed[i].date.heures + date2feed[i].date.minutes)) // Meal is past
       continue;
     else{ // Meal is later in the day
       timeleft_temp = (date2feed[i].date.heures - date_t.heures)*60 + (date2feed[i].date.minutes - date_t.minutes);
-      if(timeleft_temp < timeleft){
+      // If flag_feed is already set and timeleft is zero, discard the corresponding meal
+      if(flag_feed && (timeleft_temp == 0)) continue;
+      else if(timeleft_temp < timeleft){
         timeleft = timeleft_temp;
         *date_s = date2feed[i];
       }
@@ -627,6 +624,13 @@ void updateMeals(Date_s* date_s){
     *date_s = first_meal;
     timeleft = (24 - date_t.heures + date_s->date.heures)*60 + (0 - date_t.minutes + date_s->date.minutes);
     if (timeleft > 12*60) timeleft = 12*60;
+  }
+
+  // Ask for a feed if timeleft is 0
+  if(!flag_feed && (timeleft <= 0)){
+    // Ask for feed
+    flag_feed = true;
+    updateMeal(date_s);
   }
 }
 
