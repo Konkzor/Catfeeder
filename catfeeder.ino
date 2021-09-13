@@ -73,6 +73,7 @@ int timerId_sec;
 // IOs
 #ifdef SERVO
 Servo myservo;
+const int servoPin = 7;
 #endif
 const int button1 = 2;    // the number of the pushbutton pin
 const int button2 = 3;    // the number of the pushbutton pin
@@ -661,8 +662,8 @@ void ISR_sec(void){
 
 void feedTheCat(const short revolutions){
 #ifdef SERVO
-   // Attach the servo to pin 9
-  myservo.attach(9);
+   // Attach the servo to pin
+  myservo.attach(servoPin);
   // First turn backward to avoid jamming
   myservo.write(85);
   delay(500);
