@@ -180,6 +180,13 @@ void loop() {
     readFromRTC(&date_t);
     // Update next meal every 1 min
     updateMeal(&next_date_s);
+    // Update RTC time at 4:00 every day
+    if(myNetwork.state && (date_t.heures == 4) && (date_t.minutes == 0)){ // 1h after an hypothetical time shift
+      bool res = getNetworkTime(&date_t);
+      if (res) writeToRTC(&date_t);
+      else readFromRTC(&date_t);
+      delay(1000); // To let the message on display
+    }
     flag_time = false;
   }
   
@@ -222,20 +229,6 @@ void loop() {
     
         // If not connected, try to reconnect
         if(myNetwork.enable && !myNetwork.state) myNetwork.state = connect2Wifi();
-        
-        // If connected to the internet
-        if(myNetwork.state){
-          // Get new schedule from server
-          if(flag_feed){
-            delay(1000); // To let the message on display
-            // If first meal of monday has been served, update RTC time
-            if((next_date_s.date.heures == date2feed[0].date.heures) && (next_date_s.date.minutes == date2feed[0].date.minutes) && date_t.jourDeLaSemaine == 1){
-              bool res = getNetworkTime(&date_t);
-              delay(1000); // To let the message on display
-              if (res) writeToRTC(&date_t);
-            }
-          }
-        }
 
         // Update next meal settings (time and nbrev)
         updateMeal(&next_date_s);
