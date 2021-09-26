@@ -124,13 +124,12 @@ void setup() {
   digitalWrite(ledPin, HIGH);
   digitalWrite(enLCD, HIGH);
   
-  // ESP8266 baudrate setup
-  ESP8266.begin(115200);
-  
   // Serial
 #ifdef DEBUG
   Serial.begin(9600);
 #endif
+
+  startESP();
 
   // LCD setup
   lcd.init();
@@ -143,7 +142,7 @@ void setup() {
   // Connect to Wifi
   getNetworkSettingsFromEEPROM();
   if(myNetwork.enable){
-    myNetwork.state = connect2Wifi(true);
+    myNetwork.state = connect2Wifi();
     delay(2000);
   }
 
@@ -222,7 +221,7 @@ void loop() {
         digitalWrite(ledPin, LOW);
     
         // If not connected, try to reconnect
-        if(myNetwork.enable && !myNetwork.state) myNetwork.state = connect2Wifi(false);
+        if(myNetwork.enable && !myNetwork.state) myNetwork.state = connect2Wifi();
         
         // If connected to the internet
         if(myNetwork.state){
@@ -683,7 +682,26 @@ void feedTheCat(const short revolutions){
 /******************************************************************************
  *                              WIFI FUNCTIONS                                *
  ******************************************************************************/
-short connect2Wifi(bool reset){
+void startESP(){
+  // In case of a Arduino reboot, ESP is already set to 9600 baups
+  ESP8266.begin(9600);
+  envoieAuESP8266("AT+RST");
+  recoitDuESP8266(2000L, -1);
+  
+  // Reboot in 115200 baups if ESP has been rebooted
+  ESP8266.begin(115200);
+  envoieAuESP8266("AT+RST");
+  recoitDuESP8266(2000L, -1);
+
+  envoieAuESP8266("AT+UART_CUR=9600,8,1,0,0");
+  ESP8266.begin(9600);
+  recoitDuESP8266(2000L, -1);
+  
+  envoieAuESP8266("AT");
+  recoitDuESP8266(2000L, -1);
+}
+
+bool connect2Wifi(){
   lcd.clear();
   lcd.setCursor(8,1);
   lcd.print("WIFI");
@@ -691,9 +709,6 @@ short connect2Wifi(bool reset){
   lcd.print("CONNECTION...");
 
   bool state = false;
-  if(reset) envoieAuESP8266("AT+RST");
-  else envoieAuESP8266("AT");
-  bool res = recoitDuESP8266(2000L, -1);
   envoieAuESP8266("AT+CWMODE=1"); // WIFI MODE STATION
   recoitDuESP8266(5000L, -1);
   String ap = myNetwork.accesspoint;
