@@ -243,6 +243,9 @@ void loop() {
             }
           }
         }
+
+        // Update next meal settings (time and nbrev)
+        updateMeal(&next_date_s);
         printMainPage();
         flag_feed = false;
         //timer.enable(timerId_time);
@@ -630,7 +633,6 @@ void updateMeal(Date_s* date_s){
   if(!flag_feed && (timeleft <= 0)){
     // Ask for feed
     flag_feed = true;
-    updateMeal(date_s);
   }
 }
 
