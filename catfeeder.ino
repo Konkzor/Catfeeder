@@ -204,7 +204,7 @@ void loop() {
   switch(mainState){
     case HOME:{
       // Sleep after N min of no user interaction
-      if(inactivity_counter >= 2){
+      if(inactivity_counter >= 5){
         lcd.noBacklight();
       }
       
