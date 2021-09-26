@@ -23,9 +23,6 @@
  #define DEBUG_PRINT(x)
  #define DEBUG_PRINTLN(x)
 #endif
-            
-#define MAX_CONTENT_SIZE  110
-char buffer_array[MAX_CONTENT_SIZE];
 
 #define addr_flag 0
 
@@ -698,14 +695,14 @@ short connect2Wifi(bool reset){
   else envoieAuESP8266("AT");
   bool res = recoitDuESP8266(2000L, -1);
   envoieAuESP8266("AT+CWMODE=1"); // WIFI MODE STATION
-  res = recoitDuESP8266(5000L, -1);
+  recoitDuESP8266(5000L, -1);
   String ap = myNetwork.accesspoint;
   String key = myNetwork.key;
   envoieAuESP8266("AT+CWJAP=\"" + ap + "\",\"" + key + "\""); // JOIN ACCESS POINT
-  res = recoitDuESP8266(7000L, -1);
+  recoitDuESP8266(7000L, -1);
   state = checkWiFi();
   envoieAuESP8266("AT+CIPMUX=0");
-  res = recoitDuESP8266(2000L, -1);
+  recoitDuESP8266(2000L, -1);
 
   lcd.clear();
   lcd.setCursor(2,1);
@@ -732,29 +729,26 @@ void envoieAuESP8266(String commande){
   ESP8266.println(commande);
 }
 
-bool recoitDuESP8266(const long int timeout, char start_char){
+bool recoitDuESP8266(const long int timeout, char searched_char){
   char c;
-  char i = 0;
-  bool bufferize = false;
+  bool char_found = false;
   
-  if(start_char == 0) bufferize = true;
+  if(searched_char == -1) searched_char = true;
   
   long int t_start = millis();
   while ((t_start + timeout) > millis())
   {
     if(ESP8266.available()>0){
       c = ESP8266.read();
-      if(c == start_char){
-        bufferize = true;
-        i = 0;
-        DEBUG_PRINT(">>");
+      if(c == searched_char){
+        char_found = true;
       }
       DEBUG_PRINT(c);
-      if(bufferize){
-        buffer_array[i] = c;
-        i++;
-        if(i == MAX_CONTENT_SIZE){
-          DEBUG_PRINTLN("RX buffer is full");
+    }
+  }
+  return char_found;
+}
+
 bool recoitDateEtHeureDuESP8266(const long int timeout, String &datetime, String &dayOfWeek){
   char c;
 
