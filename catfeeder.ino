@@ -127,6 +127,7 @@ void setup() {
   // Serial
 #ifdef DEBUG
   Serial.begin(9600);
+  DEBUG_PRINTLN("******** Hello Catfeeder! ********");
 #endif
 
   startESP();
