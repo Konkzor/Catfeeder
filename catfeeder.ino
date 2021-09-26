@@ -2,7 +2,6 @@
 #include <Servo.h>
 #include <Wire.h>
 #include <SimpleTimer.h>
-#include <ArduinoJson.h>
 #include <LiquidCrystal_I2C.h>
 #include <SoftwareSerial.h>
 
@@ -57,7 +56,6 @@ typedef struct{
 }Network_s;
 Network_s myNetwork;
 
-#define GETtime "/time"
 #define HTTP " HTTP/1.1\r\n"
 SoftwareSerial ESP8266(10, 11);
 
@@ -106,7 +104,6 @@ char menuMealsCursor = 2;
 char menuMealsIndex = 0;
 char menuNetworkColCursor = 14;
 char menuNetworkRowCursor = 1;
-
 
 // Variables
 bool flag_updateDisplay = false;
@@ -758,14 +755,137 @@ bool recoitDuESP8266(const long int timeout, char start_char){
         i++;
         if(i == MAX_CONTENT_SIZE){
           DEBUG_PRINTLN("RX buffer is full");
-          break;
+bool recoitDateEtHeureDuESP8266(const long int timeout, String &datetime, String &dayOfWeek){
+  char c;
+
+  char key_datetime[] = "datetime: ";
+  char key_datetime_i = 0;
+  bool datetime_locked = false;
+  bool datetime_found = false;
+
+  char key_dayOfWeek[] = "day_of_week: ";
+  char key_dayOfWeek_i = 0;
+  bool dayOfWeek_locked = false;
+  bool dayOfWeek_found = false;
+  
+  long int t_start = millis();
+  while (((t_start + timeout) > millis()) && (!datetime_found || !dayOfWeek_found))
+  {
+    if(ESP8266.available()>0){
+      c = ESP8266.read();
+      DEBUG_PRINT(c);
+      
+      // Search for datetime
+      if(!datetime_found){ //Search only first occurrence
+        if(c == key_datetime[key_datetime_i]){ // Search for the keyword
+          if(key_datetime_i == 9){
+            // end of keyword found
+            datetime_locked = true;
+          }
+          else key_datetime_i++;
+        }
+        else if (!datetime_locked){ // Reset pointer on keyword if keyword does not match
+          key_datetime_i = 0;
+        }
+        else{ // Get all characters of interest until the last one
+          if(c == '.'){
+            datetime_locked = false;
+            datetime_found = true;
+          }
+          else{
+            datetime += c;
+          }
+        }
+      }
+
+      // Search for day of week
+      if(!dayOfWeek_found){ //Search only first occurrence
+        if(c == key_dayOfWeek[key_dayOfWeek_i]){
+          if(key_dayOfWeek_i == 12){
+            // end of keyword found
+            dayOfWeek_locked = true;
+          }
+          else key_dayOfWeek_i++;
+        }
+        else if (!dayOfWeek_locked){ // Reset pointer on keyword if keyword does not match
+          key_dayOfWeek_i = 0;
+        }
+        else{ // Get all characters of interest until the last one
+          if(c == '\n'){
+            dayOfWeek_locked = false;
+            dayOfWeek_found = true;
+          }
+          else{
+            dayOfWeek += c;
+          }
         }
       }
     }
   }
-  return bufferize;
+  
+  return (dayOfWeek_found && datetime_found);
 }
 
+
+bool getNetworkTime(Date* date){
+  lcd.clear();
+  lcd.setCursor(1,1);
+  lcd.print("TIME & DATE UPDATE");
+
+  // Start session
+  String cmd = "AT+CIPSTART=\"TCP\",\"";
+  cmd += "worldtimeapi.org";
+  cmd += "\",";
+  cmd += "80";
+  ESP8266.println(cmd);
+  recoitDuESP8266(2000L, -1);
+
+  // Send request
+  String request = "GET ";
+  request += "/api/ip.txt"; // Get settings
+  request += HTTP;
+  String cmd_send = "AT+CIPSEND=";
+  cmd_send += String(request.length() + 2);
+  ESP8266.println(cmd_send);
+  delay(2000);
+  recoitDuESP8266(2000L, -1);
+
+  String datetime_str = "";
+  String dayOfWeek_str = "";
+  ESP8266.println(request);
+  bool res = recoitDateEtHeureDuESP8266(15000L, datetime_str, dayOfWeek_str);
+  
+  if(res){
+    char date_array[20];
+    short annee, mois, jour, heures, minutes, secondes = 0;
+    datetime_str.toCharArray(date_array, 20);
+    int nb_assignments = sscanf(date_array, "%d-%d-%dT%d:%d:%d", &annee, &mois, &jour, &heures, &minutes, &secondes);
+    
+    if(nb_assignments == 6){
+      date->annee = annee%100;
+      date->mois = mois;
+      date->jour = jour;
+      date->heures = heures;
+      date->minutes = minutes;
+      date->secondes = secondes;
+      date->jourDeLaSemaine = dayOfWeek_str[0] - '0';
+    }
+    else{
+      res = false;
+    }
+  }
+
+  if(res){
+    lcd.setCursor(5,2);
+    lcd.print("SUCCEEDED");
+  }
+  else{
+    lcd.setCursor(7,2);
+    lcd.print("FAILED");
+  }
+
+  return res;
+}
 /******************************************************************************
  *                              LCD FUNCTIONS                                 *
  ******************************************************************************/
