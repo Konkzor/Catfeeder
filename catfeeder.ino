@@ -13,7 +13,7 @@
 #define printByte(args)  print(args,BYTE);
 #endif
 
-#define DEBUG
+#undef DEBUG
 #define SERVO
 
 #ifdef DEBUG
@@ -711,6 +711,28 @@ void updateMeal(Date_s* date_s){
     *date_s = first_meal;
     timeleft = (24 - date_t.heures + date_s->date.heures)*60 + (0 - date_t.minutes + date_s->date.minutes);
     if (timeleft > 12*60) timeleft = 12*60;
+  }
+
+  // Compute time_left according to weekend mode
+  if(weekendMode.enable){
+    if(date_t.jourDeLaSemaine == 5){ // Friday
+      if(((60*date_t.heures+date_t.minutes + timeleft) > 24*60) && ((60*date_t.heures+date_t.minutes + timeleft) <= 24*60 + (60*weekendMode.date.heures+weekendMode.date.minutes))){ // Meal before minimal time on Saturday
+        timeleft = 24*60 + (60*weekendMode.date.heures+weekendMode.date.minutes) - (60*date_t.heures+date_t.minutes + timeleft);
+      }
+    }
+    else if(date_t.jourDeLaSemaine == 6){ // Saturday
+      if((60*date_t.heures+date_t.minutes + timeleft) <= (60*weekendMode.date.heures+weekendMode.date.minutes)){ // Meal before minimal time
+        timeleft = (60*weekendMode.date.heures+weekendMode.date.minutes) - (60*date_t.heures+date_t.minutes);
+      }
+      else if(((60*date_t.heures+date_t.minutes + timeleft) > 24*60) && ((60*date_t.heures+date_t.minutes + timeleft) <= 24*60 + (60*weekendMode.date.heures+weekendMode.date.minutes))){ // Meal before minimal time on Sunday
+        timeleft = 24*60 + (60*weekendMode.date.heures+weekendMode.date.minutes) - (60*date_t.heures+date_t.minutes);
+      }
+    }
+    else if(date_t.jourDeLaSemaine == 7){ // Sunday
+      if((60*date_t.heures+date_t.minutes + timeleft) <= (60*weekendMode.date.heures+weekendMode.date.minutes)){ // Meal before minimal time
+        timeleft = (60*weekendMode.date.heures+weekendMode.date.minutes) - (60*date_t.heures+date_t.minutes);
+      }
+    }
   }
 
   // Ask for a feed if timeleft is 0
