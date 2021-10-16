@@ -187,6 +187,7 @@ void loop() {
       if (res) writeToRTC(&date_t);
       else readFromRTC(&date_t);
       delay(1000); // To let the message on display
+      lcd.clear();
     }
     flag_time = false;
   }
@@ -1143,7 +1144,7 @@ void getMealsFromEEPROM(void){
     date2feed[0].nbrev = 2;
     date2feed[1].date.heures = 12;
     date2feed[1].date.minutes = 0;
-    date2feed[1].nbrev = 2;
+    date2feed[1].nbrev = 1;
     date2feed[2].date.heures = 17;
     date2feed[2].date.minutes = 0;
     date2feed[2].nbrev = 1;
