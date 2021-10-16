@@ -90,10 +90,11 @@ typedef enum{
   MENU,
   DATETIME,
   MEALS,
-  NETWORK
+  NETWORK,
+  SETTINGS
 }mainState_type;
 mainState_type mainState = HOME; 
-String menuItems[] = {"DATE & TIME", "MEALS", "NETWORK", "BACK"};
+String menuItems[] = {"DATE & TIME", "MEALS", "NETWORK", "SETTINGS", "BACK"};
 char menuIndex = 0;
 char menuDisplayedIndex = 0;
 char menuTimeSettingsIndex = 1; // First digit of day value
@@ -101,6 +102,8 @@ char menuMealsCursor = 2;
 char menuMealsIndex = 0;
 char menuNetworkColCursor = 14;
 char menuNetworkRowCursor = 1;
+char menuSettingsColCursor = 9;
+char menuSettingsRowCursor = 1;
 
 // Variables
 bool flag_updateDisplay = false;
@@ -110,6 +113,12 @@ short timeleft = 0;
 Date date_t;
 Date_s next_date_s;
 int inactivity_counter = 0; // min
+// Week end mode
+typedef struct{
+  bool enable;
+  Date date;
+}WeekendMode_s;
+WeekendMode_s weekendMode;
 
 void setup() {
   bool res = false;
@@ -160,6 +169,7 @@ void setup() {
   next_date_s.date = date_t;
   next_date_s.nbrev = 2;
   getMealsFromEEPROM();
+  getWeekendModeSettingsFromEEPROM();
   // Init timeleft until next meal
   flag_feed = true;
   updateMeal(&next_date_s);
@@ -307,6 +317,11 @@ void loop() {
               lcd.blink();
               lcd.clear();
               printNetworkMenu();
+              break;
+           case SETTINGS:
+              lcd.blink();
+              lcd.clear();
+              printSettingsMenu();
               break;
            default:
               menuIndex = 0;
@@ -558,6 +573,87 @@ void loop() {
           if(++myNetwork.key[menuNetworkColCursor-2] >= 0x80) myNetwork.key[menuNetworkColCursor-2] = 0x20; // Discard useless characters
         }
         printNetworkMenu();
+      }
+      break;
+    }
+    case SETTINGS:{
+      // Go HOME after N min of inactivity
+      if(inactivity_counter >= 2){
+        inactivity_counter = 0;
+        menuIndex = 0;
+        menuDisplayedIndex = 0;
+        mainState = HOME;
+        printMainPage();
+        timer.enable(timerId_sec);
+      }
+      if(flag_button1){
+        flag_button1 = false;
+        if(menuSettingsRowCursor == 1){ // Weekend mode
+          if(menuSettingsColCursor == 9){ // State selection
+            weekendMode.enable = !weekendMode.enable;
+          }
+          else if(menuSettingsColCursor == 14){ // Hour selection
+            if(--weekendMode.date.heures == 255) weekendMode.date.heures = 23;
+          }
+          else if(menuSettingsColCursor == 17){ // Minute selection
+            if(--weekendMode.date.minutes == 255) weekendMode.date.minutes = 59;
+          }
+        }
+       printSettingsMenu();
+      }
+      
+      else if(flag_button2){
+        flag_button2 = false;
+        
+        if(menuSettingsColCursor == 9){
+          if(!weekendMode.enable){
+            // Save new settings
+            setWeekendModeSettingsToEEPROM();
+            // Reset context
+            menuSettingsRowCursor = 1;
+            menuSettingsColCursor = 9;
+            lcd.noBlink();
+            lcd.clear();
+            // Set new state
+            mainState = MENU;
+            printMenu();
+            break;
+          }
+          menuSettingsColCursor = 14;
+        }
+        else if(menuSettingsColCursor == 14){
+          menuSettingsColCursor = 17;
+        }
+        else if(menuSettingsColCursor == 17){
+          // Save new settings
+          setWeekendModeSettingsToEEPROM();
+          // Reset context
+          menuSettingsRowCursor = 1;
+          menuSettingsColCursor = 9;
+          lcd.noBlink();
+          lcd.clear();
+          // Set new state
+          mainState = MENU;
+          printMenu();
+          break;
+        }
+        printSettingsMenu();
+      }
+      
+      else if(flag_button3){
+        flag_button3 = false;
+        if(menuSettingsRowCursor == 1){ // Weekend mode
+          if(menuSettingsColCursor == 9){ // State selection
+            weekendMode.enable = !weekendMode.enable;
+          }
+          else if(menuSettingsColCursor == 14){ // Hour selection
+            if(++weekendMode.date.heures == 24) weekendMode.date.heures = 0;
+          }
+          else if(menuSettingsColCursor == 17){ // Minute selection
+            if(++weekendMode.date.minutes == 60) weekendMode.date.minutes = 0;
+          }
+        }
+        printSettingsMenu();
       }
       break;
     }
@@ -1077,6 +1173,34 @@ void printNetworkMenu(){
   
   lcd.setCursor(menuNetworkColCursor, menuNetworkRowCursor);
 }
+
+void printSettingsMenu(){
+  lcd.home();
+  lcd.print("----- SETTINGS -----");
+  lcd.setCursor(0,1);
+  lcd.print("WE MODE:");
+  lcd.setCursor(9,1);
+  if(weekendMode.enable){
+    lcd.print("ON ");
+    // Print minimal time
+    char curs = 13;
+    lcd.setCursor(curs,1);
+    lcd.print(weekendMode.date.heures / 10, DEC); // Affichage de l'heure sur deux caractéres
+    lcd.setCursor(curs+1, 1);
+    lcd.print(weekendMode.date.heures % 10, DEC);
+    lcd.setCursor(curs+2, 1);
+    lcd.print(":");
+    lcd.setCursor(curs+3, 1);
+    lcd.print(weekendMode.date.minutes / 10, DEC); // Affichage des minutes sur deux caractéres
+    lcd.setCursor(curs+4, 1);
+    lcd.print(weekendMode.date.minutes % 10, DEC);
+  }
+  else{
+    lcd.print("OFF      ");
+  }
+  
+  lcd.setCursor(menuSettingsColCursor, menuSettingsRowCursor);
+}
 /******************************************************************************
  *                              RTC FUNCTIONS                                 *
  ******************************************************************************/
@@ -1175,7 +1299,7 @@ void getNetworkSettingsFromEEPROM(void){
   else{
     myNetwork.enable = true;
   }
-  // Accespoint and key
+  // Accespoint and key (from 19 to 54)
   address = 19;
   for(int i = 0 ; i < SIZEOFARRAY(myNetwork.accesspoint); i++){
     myNetwork.accesspoint[i] = EEPROM.read(address++);
@@ -1198,4 +1322,38 @@ void setNetworkSettingsToEEPROM(void){
   for(int i = 0 ; i < SIZEOFARRAY(myNetwork.key); i++){
      EEPROM.update(address++, myNetwork.key[i]);
   }
+}
+
+void getWeekendModeSettingsFromEEPROM(void){
+  int address = 55;
+  // Enable
+  char enable = EEPROM.read(address);
+  if((enable == 0) || (enable == -1)){
+   weekendMode.enable = false;
+  }
+  else{
+    weekendMode.enable = true;
+  }
+  
+  address = 56;
+  if(enable != -1){ // EEPROM has already be written
+    weekendMode.date.heures = EEPROM.read(address++);
+    weekendMode.date.minutes = EEPROM.read(address++);
+  }
+  else{ // EEPROM never modified
+    // Default setup (09:00)
+    weekendMode.date.heures = 9;
+    weekendMode.date.minutes = 0;
+
+    setWeekendModeSettingsToEEPROM();
+  }
+}
+
+void setWeekendModeSettingsToEEPROM(void){
+  int address = 55;
+  // Enable
+  EEPROM.update(address++, (weekendMode.enable ? 1 : 0));
+  // Time
+  EEPROM.update(address++, weekendMode.date.heures);
+  EEPROM.update(address++, weekendMode.date.minutes);
 }
