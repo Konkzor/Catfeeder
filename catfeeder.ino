@@ -399,6 +399,7 @@ void loop() {
         else if(menuTimeSettingsIndex == 19){
           // Write new time settings to RTC
           writeToRTC(&date_t);
+          updateMeal(&next_date_s);
           // Reset context for next entry
           menuTimeSettingsIndex = 1;
           lcd.noBlink();
@@ -620,6 +621,7 @@ void loop() {
           if(!weekendMode.enable){
             // Save new settings
             setWeekendModeSettingsToEEPROM();
+            updateMeal(&next_date_s);
             // Reset context
             menuSettingsRowCursor = 1;
             menuSettingsColCursor = 9;
