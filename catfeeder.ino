@@ -84,6 +84,7 @@ const int enLCD = 13;
 LiquidCrystal_I2C lcd(0x27,20,4);
 uint8_t up[8]  = {0x00,0x00,0x04,0x0e,0x1f,0x00,0x00,0x00};
 uint8_t down[8]  = {0x00,0x00,0x00,0x1f,0x0e,0x04,0x00,0x00};
+uint8_t wifi[8]  = {0x1e,0x03,0x19,0x05,0x15,0x00,0x00,0x00};
 
 // MENU
 typedef enum{
@@ -147,6 +148,7 @@ void setup() {
   lcd.backlight();
   lcd.createChar(0, up);
   lcd.createChar(1, down);
+  lcd.createChar(2, wifi);
   // RTC setup (I2C)
   Wire.begin();
 
@@ -1073,12 +1075,12 @@ void blinkColon(void){
 }
 
 void printWifiState(short state){
-  lcd.setCursor(10,0);
-  if(state ==1){
-    lcd.print("WF");
+  lcd.setCursor(16,1);
+  if(state == 1){
+    lcd.printByte(2);
   }
   else{
-    lcd.print("__");
+    lcd.print("x");
   }
 }
 
