@@ -1085,17 +1085,19 @@ void printWifiState(short state){
 }
 
 void printTimeLeft(void){
-  lcd.setCursor(1,2);
-  lcd.print("Next meal in:");
-  lcd.setCursor(15, 2);
+  lcd.setCursor(3,2);
+  lcd.print(next_date_s.nbrev, DEC); // Affichage nombre de tours < 9
+  lcd.setCursor(4,2);
+  lcd.print(" P. in ");
+  lcd.setCursor(11,2);
   lcd.print((timeleft/60) / 10, DEC); // Affichage de l'heure sur deux caractéres
-  lcd.setCursor(16, 2);
+  lcd.setCursor(12,2);
   lcd.print((timeleft/60) % 10, DEC);
-  lcd.setCursor(17, 2);
+  lcd.setCursor(13,2);
   lcd.print(":");
-  lcd.setCursor(18, 2);
+  lcd.setCursor(14,2);
   lcd.print((timeleft % 60) / 10, DEC); // Affichage des minutes sur deux caractéres
-  lcd.setCursor(19, 2);
+  lcd.setCursor(15,2);
   lcd.print((timeleft % 60) % 10, DEC);
 }
 
