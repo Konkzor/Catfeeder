@@ -676,13 +676,46 @@ void loop() {
 }
 
 void updateMeal(Date_s* date_s){
+  Date_s date2feed_masked[6]; // Array with meal time masked by week end minimal time (if needed)
   Date_s first_meal;
+  bool masked = false;
+  int masked_meal_index = -1;
   bool no_meal = true;
 
+  // If weekend mode is enabled, determine if meals must be masked or not
+  if(weekendMode.enable){
+    if(((date_t.jourDeLaSemaine == 5) && ((60*date_t.heures+date_t.minutes) > (60*weekendMode.date.heures+weekendMode.date.minutes))) || // Friday after weekend minimal time
+      (date_t.jourDeLaSemaine == 6) || // Saturday
+      ((date_t.jourDeLaSemaine == 7) && ((60*date_t.heures+date_t.minutes) < (60*weekendMode.date.heures+weekendMode.date.minutes)))){ // Sunday before weekend minimal time
+        masked = true;
+    }
+  }
+
+  // Fill the meal array with masked meals (or not)
+  for(int i = 0 ; i < SIZEOFARRAY(date2feed_masked) ; i++){
+    date2feed_masked[i] = date2feed[i];
+    // If meals must be masked, set all meals before minimal time to minimal time
+    if(masked && (60*date2feed_masked[i].date.heures+date2feed_masked[i].date.minutes) < (60*weekendMode.date.heures+weekendMode.date.minutes)){
+      // If no meal already masked
+      if(masked_meal_index == -1){
+        date2feed_masked[i].date.heures = weekendMode.date.heures;
+        date2feed_masked[i].date.minutes = weekendMode.date.minutes;
+        masked_meal_index = i;
+      }
+      // Else, remove the meal and add its nbrev to the already masked meal
+      else{
+        date2feed_masked[masked_meal_index].nbrev += date2feed_masked[i].nbrev;
+        date2feed_masked[i].nbrev = 0;
+        if(date2feed_masked[masked_meal_index].nbrev > 9)
+          date2feed_masked[masked_meal_index].nbrev = 9;
+      }
+    }
+  }
+
   // Initialise first_meal value and detect if no meal is activaed
-  for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){
-    if(date2feed[i].nbrev != 0){
-      first_meal = date2feed[i];
+  for(int i = 0 ; i < SIZEOFARRAY(date2feed_masked) ; i++){
+    if(date2feed_masked[i].nbrev != 0){
+      first_meal = date2feed_masked[i];
       no_meal = false;
       break;
     }
@@ -697,16 +730,16 @@ void updateMeal(Date_s* date_s){
   timeleft = 24*60; // By default (the max value)
   short timeleft_temp;
   for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){ 
-    if((date2feed[i].nbrev == 0) || // Meal is not activated, discard it
-      (60*date_t.heures+date_t.minutes > 60*date2feed[i].date.heures + date2feed[i].date.minutes)) // Meal is past
+    if((date2feed_masked[i].nbrev == 0) || // Meal is not activated, discard it
+      (60*date_t.heures+date_t.minutes > 60*date2feed_masked[i].date.heures + date2feed_masked[i].date.minutes)) // Meal is past
       continue;
     else{ // Meal is later in the day
-      timeleft_temp = (date2feed[i].date.heures - date_t.heures)*60 + (date2feed[i].date.minutes - date_t.minutes);
+      timeleft_temp = (date2feed_masked[i].date.heures - date_t.heures)*60 + (date2feed_masked[i].date.minutes - date_t.minutes);
       // If flag_feed is already set and timeleft is zero, discard the corresponding meal
       if(flag_feed && (timeleft_temp == 0)) continue;
       else if(timeleft_temp < timeleft){
         timeleft = timeleft_temp;
-        *date_s = date2feed[i];
+        *date_s = date2feed_masked[i];
       }
     }
   }
@@ -714,38 +747,16 @@ void updateMeal(Date_s* date_s){
   // If all meal are served, set next meal as first_meal
   if (timeleft == 24*60){
     // Found the first meal of the day
-    for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){
-      if(date2feed[i].nbrev == 0) // Meal is not activated, discard it
+    for(int i = 0 ; i < SIZEOFARRAY(date2feed_masked) ; i++){
+      if(date2feed_masked[i].nbrev == 0) // Meal is not activated, discard it
         continue;
-      else if(60*date2feed[i].date.heures + date2feed[i].date.minutes < 60*first_meal.date.heures + first_meal.date.minutes){
-        first_meal = date2feed[i];
+      else if(60*date2feed_masked[i].date.heures + date2feed_masked[i].date.minutes < 60*first_meal.date.heures + first_meal.date.minutes){
+        first_meal = date2feed_masked[i];
       }
     }
     *date_s = first_meal;
     timeleft = (24 - date_t.heures + date_s->date.heures)*60 + (0 - date_t.minutes + date_s->date.minutes);
     if (timeleft > 12*60) timeleft = 12*60;
-  }
-
-  // Compute time_left according to weekend mode
-  if(weekendMode.enable){
-    if(date_t.jourDeLaSemaine == 5){ // Friday
-      if(((60*date_t.heures+date_t.minutes + timeleft) > 24*60) && ((60*date_t.heures+date_t.minutes + timeleft) <= 24*60 + (60*weekendMode.date.heures+weekendMode.date.minutes))){ // Meal before minimal time on Saturday
-        timeleft = 24*60 + (60*weekendMode.date.heures+weekendMode.date.minutes) - (60*date_t.heures+date_t.minutes + timeleft);
-      }
-    }
-    else if(date_t.jourDeLaSemaine == 6){ // Saturday
-      if((60*date_t.heures+date_t.minutes + timeleft) <= (60*weekendMode.date.heures+weekendMode.date.minutes)){ // Meal before minimal time
-        timeleft = (60*weekendMode.date.heures+weekendMode.date.minutes) - (60*date_t.heures+date_t.minutes);
-      }
-      else if(((60*date_t.heures+date_t.minutes + timeleft) > 24*60) && ((60*date_t.heures+date_t.minutes + timeleft) <= 24*60 + (60*weekendMode.date.heures+weekendMode.date.minutes))){ // Meal before minimal time on Sunday
-        timeleft = 24*60 + (60*weekendMode.date.heures+weekendMode.date.minutes) - (60*date_t.heures+date_t.minutes);
-      }
-    }
-    else if(date_t.jourDeLaSemaine == 7){ // Sunday
-      if((60*date_t.heures+date_t.minutes + timeleft) <= (60*weekendMode.date.heures+weekendMode.date.minutes)){ // Meal before minimal time
-        timeleft = (60*weekendMode.date.heures+weekendMode.date.minutes) - (60*date_t.heures+date_t.minutes);
-      }
-    }
   }
 
   // Ask for a feed if timeleft is 0
