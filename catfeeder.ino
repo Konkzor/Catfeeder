@@ -30,11 +30,12 @@ typedef struct{
   uint8_t secondes;
   uint8_t minutes;
   uint8_t heures; // format 24h
-  uint8_t jourDeLaSemaine; // 1~7 = lundi, mardi, ... (for RTC purpose)
+  uint8_t jourDeLaSemaine; // 0~6 = lundi, mardi, ... (for RTC purpose)
   uint8_t jour;
   uint8_t mois; 
   uint8_t annee; // format yy (ex 2012 -> 12)
 }Date;
+String days_short[7] = {"SU", "MO", "TU", "WE", "TH", "FR", "SA"};
 
 typedef struct{
   Date date;
@@ -223,7 +224,8 @@ void loop() {
       // Manage time update on display
       if(flag_updateDisplay){
         // Update date, time and timeleft on display
-        printDateAndHour(&date_t, 0);
+        printDate(&date_t, 0, 0);
+        printTime(&date_t, 0, 15);
         printTimeLeft();
         flag_updateDisplay = false;
       }
@@ -363,12 +365,15 @@ void loop() {
       // Down button
       if(flag_button1){
         if(menuTimeSettingsIndex == 1){
-          if(--date_t.jour == 0) date_t.jour = 31;
+          if(--date_t.jourDeLaSemaine == 255) date_t.jourDeLaSemaine = 6;
         }
         else if(menuTimeSettingsIndex == 4){
-          if(--date_t.mois == 0) date_t.mois = 12;
+          if(--date_t.jour == 0) date_t.jour = 31;
         }
         else if(menuTimeSettingsIndex == 7){
+          if(--date_t.mois == 0) date_t.mois = 12;
+        }
+        else if(menuTimeSettingsIndex == 10){
           if(--date_t.annee == 0) date_t.annee = 99;
         }
         if(menuTimeSettingsIndex == 16){
@@ -386,7 +391,8 @@ void loop() {
         flag_button2 = false;
         if(menuTimeSettingsIndex == 1) menuTimeSettingsIndex = 4;
         else if(menuTimeSettingsIndex == 4) menuTimeSettingsIndex = 7;
-        else if(menuTimeSettingsIndex == 7) menuTimeSettingsIndex = 16;
+        else if(menuTimeSettingsIndex == 7) menuTimeSettingsIndex = 10;
+        else if(menuTimeSettingsIndex == 10) menuTimeSettingsIndex = 16;
         else if(menuTimeSettingsIndex == 16) menuTimeSettingsIndex = 19;
         else if(menuTimeSettingsIndex == 19){
           // Write new time settings to RTC
@@ -406,12 +412,15 @@ void loop() {
       // Up button
       else if(flag_button3){
         if(menuTimeSettingsIndex == 1){
-          if(++date_t.jour == 32) date_t.jour = 1;
+          if(++date_t.jourDeLaSemaine == 7) date_t.jourDeLaSemaine = 0;
         }
         else if(menuTimeSettingsIndex == 4){
-          if(++date_t.mois == 13) date_t.mois = 1;
+          if(++date_t.jour == 32) date_t.jour = 1;
         }
         else if(menuTimeSettingsIndex == 7){
+          if(++date_t.mois == 13) date_t.mois = 1;
+        }
+        else if(menuTimeSettingsIndex == 10){
           if(++date_t.annee == 100) date_t.annee = 0;
         }
         if(menuTimeSettingsIndex == 16){
@@ -1011,33 +1020,39 @@ bool getNetworkTime(Date* date){
 /******************************************************************************
  *                              LCD FUNCTIONS                                 *
  ******************************************************************************/
-void printDateAndHour(Date *date, char row) {
-  lcd.setCursor(0, row); // Place le curseur à (0,0)
+void printDate(Date *date, char row, char col_0) {
+  lcd.setCursor(col_0, row);
+  lcd.print(days_short[date->jourDeLaSemaine]); // 2 lettres
+  lcd.setCursor(col_0+2, row);
+  lcd.print("-");
+  lcd.setCursor(col_0+3, row); // Place le curseur à (0,0)
   lcd.print(date->jour / 10, DEC);// Affichage du jour sur deux caractéres
-  lcd.setCursor(1, row);
+  lcd.setCursor(col_0+4, row);
   lcd.print(date->jour % 10, DEC);
-  lcd.setCursor(2, row);
+  lcd.setCursor(col_0+5, row);
   lcd.print("/");
-  lcd.setCursor(3, row);
+  lcd.setCursor(col_0+6, row);
   lcd.print(date->mois / 10, DEC);// Affichage du mois sur deux caractéres
-  lcd.setCursor(4, row);
+  lcd.setCursor(col_0+7, row);
   lcd.print(date->mois % 10, DEC);
-  lcd.setCursor(5, row);
+  lcd.setCursor(col_0+8, row);
   lcd.print("/");
-  lcd.setCursor(6, row);
+  lcd.setCursor(col_0+9, row);
   lcd.print(date->annee / 10, DEC);// Affichage de l'année sur deux caractéres
-  lcd.setCursor(7, row);
+  lcd.setCursor(col_0+10, row);
   lcd.print(date->annee % 10, DEC);
-  
-  lcd.setCursor(15, row);
+}
+
+void printTime(Date *date, char row, char col_0) {
+  lcd.setCursor(col_0, row);
   lcd.print(date->heures / 10, DEC); // Affichage de l'heure sur deux caractéres
-  lcd.setCursor(16, row);
+  lcd.setCursor(col_0+1, row);
   lcd.print(date->heures % 10, DEC);
-  lcd.setCursor(17, row);
+  lcd.setCursor(col_0+2, row);
   lcd.print(":");
-  lcd.setCursor(18, row);
+  lcd.setCursor(col_0+3, row);
   lcd.print(date->minutes / 10, DEC); // Affichage des minutes sur deux caractéres
-  lcd.setCursor(19, row);
+  lcd.setCursor(col_0+4, row);
   lcd.print(date->minutes % 10, DEC);
 }
 
@@ -1084,7 +1099,8 @@ void printTimeLeft(void){
 
 void printMainPage(){
   lcd.clear();
-  printDateAndHour(&date_t, 0);
+  printDate(&date_t, 0, 0);
+  printTime(&date_t, 0, 15);
   printTimeLeft();
   if(myNetwork.enable)
     printWifiState(myNetwork.state);
@@ -1122,7 +1138,8 @@ void printMenu(){
 void printDateTimeMenu(Date *date){
   lcd.home();
   lcd.print("---- DATE & TIME ---");
-  printDateAndHour(date, 2);
+  printDate(date, 2, 0);
+  printTime(date, 2, 15);
   lcd.setCursor(menuTimeSettingsIndex, 2);
 }
 
