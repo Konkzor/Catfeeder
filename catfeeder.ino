@@ -136,7 +136,7 @@ void setup() {
   pinMode(ledPin, OUTPUT);
   pinMode(receivIRPin, INPUT);
   
-  digitalWrite(ledPin, HIGH);
+  digitalWrite(ledPin, LOW);
   digitalWrite(enLCD, HIGH);
   tone(ledIRPin, 56000);
   
@@ -246,9 +246,7 @@ void loop() {
         
         // Feed the cat
         printTime2Eat();
-        digitalWrite(ledPin, HIGH);
         feedTheCat(next_date_s.nbrev);
-        digitalWrite(ledPin, LOW);
     
         // If not connected, try to reconnect
         if(myNetwork.enable && !myNetwork.state) myNetwork.state = connect2Wifi();
@@ -804,7 +802,16 @@ void ISR_time(void){
 }
 
 void ISR_sec(void){
+  // Blink colon
   blinkColon();
+
+  // Blink LED if reservoir is empty
+  if(reservoir_empty){
+    digitalWrite(ledPin, !digitalRead(ledPin));
+  }
+  else{
+    digitalWrite(ledPin, LOW);
+  }
 }
 
 void feedTheCat(const short revolutions){
