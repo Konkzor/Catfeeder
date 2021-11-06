@@ -74,10 +74,12 @@ const int servoPin = 7;
 const int button1 = 2;    // the number of the pushbutton pin
 const int button2 = 3;    // the number of the pushbutton pin
 const int button3 = 4;    // the number of the pushbutton pin
-const int ledPin = 1;        // the number of the LED pin
+const int ledPin = 1;     // the number of the LED pin
 bool flag_button1 = false;
 bool flag_button2 = false;
 bool flag_button3 = false;
+const int ledIRPin = 5;
+const int receivIRPin = 6;
 
 // LCD
 const int enLCD = 13;
@@ -121,6 +123,7 @@ typedef struct{
   Date date;
 }WeekendMode_s;
 WeekendMode_s weekendMode;
+bool reservoir_empty = false;
 
 void setup() {
   bool res = false;
@@ -131,9 +134,11 @@ void setup() {
   pinMode(button3, INPUT_PULLUP);
   pinMode(enLCD, OUTPUT);
   pinMode(ledPin, OUTPUT);
+  pinMode(receivIRPin, INPUT);
   
   digitalWrite(ledPin, HIGH);
   digitalWrite(enLCD, HIGH);
+  tone(ledIRPin, 56000);
   
   // Serial
 #ifdef DEBUG
@@ -202,6 +207,8 @@ void loop() {
       delay(1000); // To let the message on display
       lcd.clear();
     }
+    // Update food reservoir status
+    reservoir_empty = updateReservoirStatus();
     flag_time = false;
   }
   
@@ -764,6 +771,10 @@ void updateMeal(Date_s* date_s){
     // Ask for feed
     flag_feed = true;
   }
+}
+
+bool updateReservoirStatus(void){
+  return (digitalRead(receivIRPin) == 0);
 }
 
 void ISR_button1(void){
