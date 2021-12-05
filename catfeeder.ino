@@ -1,13 +1,20 @@
+#include <EEPROM.h>
 #include <Servo.h>
 #include <Wire.h>
 #include <SimpleTimer.h>
-#include <ArduinoJson.h>
-#include <LiquidCrystal.h>
+#include <LiquidCrystal_I2C.h>
 #include <SoftwareSerial.h>
+
+#define SIZEOFARRAY(ARRAY) sizeof(ARRAY)/sizeof(ARRAY[0])
+
+#if defined(ARDUINO) && ARDUINO >= 100
+#define printByte(args)  write(args);
+#else
+#define printByte(args)  print(args,BYTE);
+#endif
 
 #undef DEBUG
 #define SERVO
-#define LCD
 
 #ifdef DEBUG
  #define DEBUG_PRINT(x)  Serial.print(x)
@@ -16,9 +23,6 @@
  #define DEBUG_PRINT(x)
  #define DEBUG_PRINTLN(x)
 #endif
-            
-#define MAX_CONTENT_SIZE  110
-char buffer_array[MAX_CONTENT_SIZE];
 
 #define addr_flag 0
 
@@ -26,15 +30,15 @@ typedef struct{
   uint8_t secondes;
   uint8_t minutes;
   uint8_t heures; // format 24h
-  uint8_t jourDeLaSemaine; // 1~7 = lundi, mardi, ... (for RTC purpose)
+  uint8_t jourDeLaSemaine; // 0~6 = lundi, mardi, ... (for RTC purpose)
   uint8_t jour;
   uint8_t mois; 
   uint8_t annee; // format yy (ex 2012 -> 12)
 }Date;
+String days_short[7] = {"SU", "MO", "TU", "WE", "TH", "FR", "SA"};
 
 typedef struct{
   Date date;
-  bool state; // 1 is done
   short nbrev; // revolution
 }Date_s;
 
@@ -42,25 +46,20 @@ typedef struct{
 #define DS1307_ADDRESS 0x68
 
 // WIFI
-#define NomduReseauWifi "Livebox-A536"
-#define MotDePasse "4PGK3DGFrhQ5ZqnoWY"
-#define IPraspberry "192.168.1.51"
-#define PORTraspberry "5000"
-#define GETschedule "/catfeeder/schedule"
-#define GETlog "/catfeeder/logger"
-#define GETtime "/time"
-#define HTTP " HTTP/1.1\r\n"
+typedef struct{
+  bool enable;
+  unsigned char accesspoint[17];
+  unsigned char key[18];
+  char state;
+}Network_s;
+Network_s myNetwork;
 
+#define HTTP " HTTP/1.1\r\n"
 SoftwareSerial ESP8266(10, 11);
 
 // Feeder
 #define timeForOneTurn 2000 // ms
-Date_s date2feed[5];
-int nb_meals = 4;
-// Breakfast at 7H
-// Lunch at 11H30
-// Break at 17H
-// Dinner at 21H
+Date_s date2feed[6];
 
 // Timer
 SimpleTimer timer;
@@ -70,51 +69,103 @@ int timerId_sec;
 // IOs
 #ifdef SERVO
 Servo myservo;
+const int servoPin = 7;
 #endif
-const int buttonPin = 2;    // the number of the pushbutton pin
-const int ledGreenPin = 12;   // the number of the Greed LED pin
+const int button1 = 2;    // the number of the pushbutton pin
+const int button2 = 3;    // the number of the pushbutton pin
+const int button3 = 4;    // the number of the pushbutton pin
+const int ledPin = 1;     // the number of the LED pin
+bool flag_button1 = false;
+bool flag_button2 = false;
+bool flag_button3 = false;
+const int ledIRPin = 5;
+const int receivIRPin = 6;
 
 // LCD
-#ifdef LCD
-LiquidCrystal lcd(8, 7, 6, 5, 4, 3);
-#endif
+const int enLCD = 13;
+LiquidCrystal_I2C lcd(0x27,20,4);
+uint8_t up[8]  = {0x00,0x00,0x04,0x0e,0x1f,0x00,0x00,0x00};
+uint8_t down[8]  = {0x00,0x00,0x00,0x1f,0x0e,0x04,0x00,0x00};
+uint8_t wifi[8]  = {0x00,0x00,0x00,0x1e,0x03,0x19,0x05,0x15};
+
+// MENU
+typedef enum{
+  HOME = 0,
+  MENU,
+  DATETIME,
+  MEALS,
+  NETWORK,
+  SETTINGS
+}mainState_type;
+mainState_type mainState = HOME; 
+String menuItems[] = {"DATE & TIME", "MEALS", "NETWORK", "SETTINGS", "BACK"};
+char menuIndex = 0;
+char menuDisplayedIndex = 0;
+char menuTimeSettingsIndex = 1; // First digit of day value
+char menuMealsCursor = 2;
+char menuMealsIndex = 0;
+char menuNetworkColCursor = 14;
+char menuNetworkRowCursor = 1;
+char menuSettingsColCursor = 9;
+char menuSettingsRowCursor = 1;
 
 // Variables
-short wifiState = 0;
+bool flag_updateDisplay = false;
 bool flag_feed = true;
-bool flag_feed_force = false;
+bool flag_time = false;
 short timeleft = 0;
 Date date_t;
 Date_s next_date_s;
+int inactivity_counter = 0; // min
+// Week end mode
+typedef struct{
+  bool enable;
+  Date date;
+}WeekendMode_s;
+WeekendMode_s weekendMode;
+bool reservoir_empty = false;
 
 void setup() {
   bool res = false;
-  // ESP8266 baudrate setup
-  ESP8266.begin(115200);
+
+  // IOs
+  pinMode(button1, INPUT_PULLUP);
+  pinMode(button2, INPUT_PULLUP);
+  pinMode(button3, INPUT_PULLUP);
+  pinMode(enLCD, OUTPUT);
+  pinMode(ledPin, OUTPUT);
+  pinMode(receivIRPin, INPUT);
+  
+  digitalWrite(ledPin, LOW);
+  digitalWrite(enLCD, HIGH);
+  tone(ledIRPin, 56000);
   
   // Serial
 #ifdef DEBUG
   Serial.begin(9600);
+  DEBUG_PRINTLN("******** Hello Catfeeder! ********");
 #endif
+
+  startESP();
 
   // LCD setup
-#ifdef LCD
-  lcd.begin(20, 4);
-#endif
+  lcd.init();
+  lcd.backlight();
+  lcd.createChar(0, up);
+  lcd.createChar(1, down);
+  lcd.createChar(2, wifi);
   // RTC setup (I2C)
   Wire.begin();
-  
-  // IOs
-  pinMode(buttonPin, INPUT_PULLUP);
-  pinMode(ledGreenPin, OUTPUT);
 
   // Connect to Wifi
-  wifiState = connect2Wifi(true);
-  if(wifiState) log2PI("?code=0");
-  delay(2000);
+  getNetworkSettingsFromEEPROM();
+  if(myNetwork.enable){
+    myNetwork.state = connect2Wifi();
+    delay(2000);
+  }
 
   //RTC synchronization
-  if(wifiState){
+  if(myNetwork.state){
     res = getNetworkTime(&date_t);
     if (res) writeToRTC(&date_t);
     else readFromRTC(&date_t);
@@ -125,153 +176,648 @@ void setup() {
   // Setup feeder schedule
   next_date_s.date = date_t;
   next_date_s.nbrev = 2;
-  setupDefaultFeeder(); // Default
+  getMealsFromEEPROM();
+  getWeekendModeSettingsFromEEPROM();
+  // Init timeleft until next meal
+  flag_feed = true;
+  updateMeal(&next_date_s);
   
-  // Get schedule from Raspberry Pi
-  if(wifiState){
-    res = getScheduleFromRaspberry();
-    delay(1000);
-  }
-  
-#ifdef LCD
   printMainPage();
-#endif
-
-  // Interrupt on PushButon
-  attachInterrupt(digitalPinToInterrupt(buttonPin), ISR_feed, FALLING);
+  
   // Timer setup
   timerId_time = timer.setInterval(60000, ISR_time); // Every 1 min
   timerId_sec = timer.setInterval(500, ISR_sec); // Every 500ms
 }
 
-void setupDefaultFeeder(void){
-  nb_meals = 4;
-  // Time setups
-  date2feed[0].date.heures = 7;
-  date2feed[0].date.minutes = 0;
-  date2feed[0].nbrev = 2;
-  date2feed[1].date.heures = 12;
-  date2feed[1].date.minutes = 0;
-  date2feed[1].nbrev = 2;
-  date2feed[2].date.heures = 17;
-  date2feed[2].date.minutes = 0;
-  date2feed[2].nbrev = 1;
-  date2feed[3].date.heures = 21;
-  date2feed[3].date.minutes = 0;
-  date2feed[3].nbrev = 2;
-}
-
 void loop() {
-  if(flag_feed || flag_feed_force){
-    timer.disable(timerId_sec);
-    timer.disable(timerId_time);
-    
-    // Feed the cat
-#ifdef LCD
-    printTime2Eat();
-#endif
-    digitalWrite(ledGreenPin, HIGH);
-    feedTheCat(next_date_s.nbrev);
-    digitalWrite(ledGreenPin, LOW);
+  if(flag_time){
+    // Update display if time is displayed
+    flag_updateDisplay = true;
+    // Inactivity counter increment
+    inactivity_counter++;
+    // Update Time
+    readFromRTC(&date_t);
+    // Update next meal every 1 min
+    updateMeal(&next_date_s);
+    // Update RTC time at 4:00 every day
+    if(myNetwork.state && (date_t.heures == 4) && (date_t.minutes == 0)){ // 1h after an hypothetical time shift
+      bool res = getNetworkTime(&date_t);
+      if (res) writeToRTC(&date_t);
+      else readFromRTC(&date_t);
+      delay(1000); // To let the message on display
+      lcd.clear();
+    }
+    // Update food reservoir status
+    reservoir_empty = updateReservoirStatus();
+    flag_time = false;
+  }
+  
+  // Detect button push
+  ISR_button1();
+  ISR_button2();
+  ISR_button3();
 
-    // If not connected, try to reconnect
-    if(!wifiState) wifiState = connect2Wifi(false);
-    
-    // If connected to the internet
-    if(wifiState){
-      String log_str = "?code=1&quantity=";
-      log_str += String(next_date_s.nbrev);
-      // Send log to server
-      log2PI(log_str);
-      // Get new schedule from server
-      if(flag_feed){
-        bool res = getScheduleFromRaspberry();
-        delay(1000); // To let the message on display
-        // If first meal of monday has been served, update RTC time
-        if((next_date_s.date.heures == date2feed[0].date.heures) && (next_date_s.date.minutes == date2feed[0].date.minutes) && date_t.jourDeLaSemaine == 1){
-          res = getNetworkTime(&date_t);
-          delay(1000); // To let the message on display
-          if (res) writeToRTC(&date_t);
-        }
+  // Wake-up the screen if one button is pushed
+  if(flag_button1 || flag_button2 || flag_button3){
+    inactivity_counter = 0;
+    lcd.backlight();
+  }
+  
+  switch(mainState){
+    case HOME:{
+      // Sleep after N min of no user interaction
+      if(inactivity_counter >= 5){
+        lcd.noBacklight();
       }
+      
+      // Manage time update on display
+      if(flag_updateDisplay){
+        // Update date, time and timeleft on display
+        printDate(&date_t, 0, 0);
+        printTime(&date_t, 0, 15);
+        printTimeLeft();
+        flag_updateDisplay = false;
+      }
+
+      // Manage food service
+      if(flag_feed){
+        timer.disable(timerId_sec);
+        //timer.disable(timerId_time);
+        
+        // Feed the cat
+        printTime2Eat();
+        feedTheCat(next_date_s.nbrev);
+    
+        // If not connected, try to reconnect
+        if(myNetwork.enable && !myNetwork.state) myNetwork.state = connect2Wifi();
+
+        // Update next meal settings (time and nbrev)
+        updateMeal(&next_date_s);
+        printMainPage();
+        flag_feed = false;
+        //timer.enable(timerId_time);
+        timer.enable(timerId_sec);
+      }
+
+      // Transition
+      if(flag_button1 || flag_button3){ // Discard button 1 and 3
+        flag_button1 = false;
+        flag_button3 = false;
+      }
+      if(flag_button2){
+        //timer.disable(timerId_time);
+        timer.disable(timerId_sec);
+        
+        mainState = MENU;
+        lcd.clear();
+        printMenu();
+        flag_button2 = false;
+      }
+      break;
+    }
+    
+    case MENU:{
+      // Go HOME after N min of inactivity
+      if(inactivity_counter >= 2){
+        inactivity_counter = 0;
+        menuIndex = 0;
+        menuDisplayedIndex = 0;
+        mainState = HOME;
+        printMainPage();
+        timer.enable(timerId_sec);
+      }
+      // Up button
+      if(flag_button1){
+        if(menuIndex > 0)
+          menuIndex--;
+        else
+          menuIndex = SIZEOFARRAY(menuItems) -1;
+        // Manage auto scrolling
+        if(menuIndex - menuDisplayedIndex > 2) menuDisplayedIndex = menuIndex - 2;
+        else if(menuIndex - menuDisplayedIndex < 0) menuDisplayedIndex = menuIndex;
+        printMenu();
+        flag_button1 = false;
+      }
+      
+      // Validation button
+      else if(flag_button2){
+        // Last item is a Return
+        if(menuIndex == SIZEOFARRAY(menuItems)-1){
+          menuIndex = 0;
+          menuDisplayedIndex = 0;
+          mainState = HOME;
+          printMainPage();
+          timer.enable(timerId_sec);
+        }
+        else{
+          mainState = 2 + menuIndex;
+          switch(mainState){
+            case DATETIME:
+              lcd.blink();
+              lcd.clear();
+              printDateTimeMenu(&date_t);
+              break;
+           case MEALS:
+              lcd.blink();
+              lcd.clear();
+              printMealsMenu();
+              break;
+           case NETWORK:
+              lcd.blink();
+              lcd.clear();
+              printNetworkMenu();
+              break;
+           case SETTINGS:
+              lcd.blink();
+              lcd.clear();
+              printSettingsMenu();
+              break;
+           default:
+              menuIndex = 0;
+              menuDisplayedIndex = 0;
+              mainState = HOME;
+              printMainPage();
+              timer.enable(timerId_sec);
+              break;
+          }
+        }
+        flag_button2 = false;
+      }
+
+      // Down button
+      else if(flag_button3){
+        if(menuIndex < (SIZEOFARRAY(menuItems)-1))
+          menuIndex++;
+        else
+          menuIndex = 0;
+        // Manage auto scrolling
+        if(menuIndex - menuDisplayedIndex > 2) menuDisplayedIndex = menuIndex - 2;
+        else if(menuIndex - menuDisplayedIndex < 0) menuDisplayedIndex = menuIndex;
+        printMenu();
+        flag_button3 = false;
+      }
+      break;
     }
 
-    if(flag_feed) updateMeals(&next_date_s);
-    
-#ifdef LCD
-    printMainPage();
-#endif
+    case DATETIME:{
+      // Go HOME after N min of inactivity
+      if(inactivity_counter >= 2){
+        inactivity_counter = 0;
+        menuIndex = 0;
+        menuDisplayedIndex = 0;
+        mainState = HOME;
+        printMainPage();
+        timer.enable(timerId_sec);
+      }
+      // Down button
+      if(flag_button1){
+        if(menuTimeSettingsIndex == 1){
+          if(--date_t.jourDeLaSemaine == 255) date_t.jourDeLaSemaine = 6;
+        }
+        else if(menuTimeSettingsIndex == 4){
+          if(--date_t.jour == 0) date_t.jour = 31;
+        }
+        else if(menuTimeSettingsIndex == 7){
+          if(--date_t.mois == 0) date_t.mois = 12;
+        }
+        else if(menuTimeSettingsIndex == 10){
+          if(--date_t.annee == 0) date_t.annee = 99;
+        }
+        if(menuTimeSettingsIndex == 16){
+          if(--date_t.heures == 255) date_t.heures = 23;
+        }
+        else if(menuTimeSettingsIndex == 19){
+          if(--date_t.minutes == 255) date_t.minutes = 59;
+        }
+        printDateTimeMenu(&date_t);
+        flag_button1 = false;
+      }
+      
+      // Next value button
+      else if(flag_button2){
+        flag_button2 = false;
+        if(menuTimeSettingsIndex == 1) menuTimeSettingsIndex = 4;
+        else if(menuTimeSettingsIndex == 4) menuTimeSettingsIndex = 7;
+        else if(menuTimeSettingsIndex == 7) menuTimeSettingsIndex = 10;
+        else if(menuTimeSettingsIndex == 10) menuTimeSettingsIndex = 16;
+        else if(menuTimeSettingsIndex == 16) menuTimeSettingsIndex = 19;
+        else if(menuTimeSettingsIndex == 19){
+          // Write new time settings to RTC
+          writeToRTC(&date_t);
+          updateMeal(&next_date_s);
+          // Reset context for next entry
+          menuTimeSettingsIndex = 1;
+          lcd.noBlink();
+          lcd.clear();
+          // Set new state
+          mainState = MENU;
+          printMenu();
+          break;
+        }
+        printDateTimeMenu(&date_t);
+      }
 
-    flag_feed = false;
-    flag_feed_force = false;
-    timer.enable(timerId_time);
-    timer.enable(timerId_sec);
+      // Up button
+      else if(flag_button3){
+        if(menuTimeSettingsIndex == 1){
+          if(++date_t.jourDeLaSemaine == 7) date_t.jourDeLaSemaine = 0;
+        }
+        else if(menuTimeSettingsIndex == 4){
+          if(++date_t.jour == 32) date_t.jour = 1;
+        }
+        else if(menuTimeSettingsIndex == 7){
+          if(++date_t.mois == 13) date_t.mois = 1;
+        }
+        else if(menuTimeSettingsIndex == 10){
+          if(++date_t.annee == 100) date_t.annee = 0;
+        }
+        if(menuTimeSettingsIndex == 16){
+          if(++date_t.heures == 24) date_t.heures = 0;
+        }
+        else if(menuTimeSettingsIndex == 19){
+          if(++date_t.minutes == 60) date_t.minutes = 0;
+        }
+        printDateTimeMenu(&date_t);
+        flag_button3 = false;
+      }
+      break;
+    }
+
+    case MEALS:{
+      // Go HOME after N min of inactivity
+      if(inactivity_counter >= 2){
+        inactivity_counter = 0;
+        menuIndex = 0;
+        menuDisplayedIndex = 0;
+        mainState = HOME;
+        printMainPage();
+        timer.enable(timerId_sec);
+      }
+      // Down button
+      if(flag_button1){
+        flag_button1 = false;
+        if(menuMealsCursor == 2){
+          if(--date2feed[menuMealsIndex].date.heures == 255) date2feed[menuMealsIndex].date.heures = 23;
+        }
+        else if(menuMealsCursor == 5){
+          if(--date2feed[menuMealsIndex].date.minutes == 255) date2feed[menuMealsIndex].date.minutes = 59;
+        }
+        else if(menuMealsCursor == 7){
+          if(--date2feed[menuMealsIndex].nbrev < 0) date2feed[menuMealsIndex].nbrev = 9;
+        }
+        printMealsMenu();
+      }
+      
+      // Next value button
+      else if(flag_button2){
+        flag_button2 = false;
+        
+        if(menuMealsCursor == 2) menuMealsCursor = 5;
+        else if(menuMealsCursor == 5) menuMealsCursor = 7;
+        else if(menuMealsCursor == 7){
+          menuMealsCursor = 2;
+          if(++menuMealsIndex == SIZEOFARRAY(date2feed)){
+            // Save new settings
+            setMealsToEEPROM();
+            updateMeal(&next_date_s);
+            // Reset context
+            menuMealsIndex = 0;
+            lcd.noBlink();
+            lcd.clear();
+            // Set new state
+            mainState = MENU;
+            printMenu();
+            break;
+          }
+        }
+        printMealsMenu();
+      }
+
+      // Up button
+      else if(flag_button3){
+        flag_button3 = false;
+        if(menuMealsCursor == 2){
+          if(++date2feed[menuMealsIndex].date.heures == 24) date2feed[menuMealsIndex].date.heures = 0;
+        }
+        else if(menuMealsCursor == 5){
+          if(++date2feed[menuMealsIndex].date.minutes == 60) date2feed[menuMealsIndex].date.minutes = 0;
+        }
+        else if(menuMealsCursor == 7){
+          if(++date2feed[menuMealsIndex].nbrev == 10) date2feed[menuMealsIndex].nbrev = 0;
+        }
+        printMealsMenu();
+      }
+      break;
+    }
+
+    case NETWORK:{
+      // Go HOME after N min of inactivity
+      if(inactivity_counter >= 2){
+        inactivity_counter = 0;
+        menuIndex = 0;
+        menuDisplayedIndex = 0;
+        mainState = HOME;
+        printMainPage();
+        timer.enable(timerId_sec);
+      }
+      if(flag_button1){
+        flag_button1 = false;
+        if(menuNetworkRowCursor == 1){
+          myNetwork.enable = !myNetwork.enable;
+        }
+        else if(menuNetworkRowCursor == 2){
+          if(--myNetwork.accesspoint[menuNetworkColCursor-3] < 0x20) myNetwork.accesspoint[menuNetworkColCursor-3] = 0x7F; // Discard useless characters
+        }
+        else if(menuNetworkRowCursor == 3){
+          if(--myNetwork.key[menuNetworkColCursor-2] < 0x20) myNetwork.key[menuNetworkColCursor-2] = 0x7F; // Discard useless characters
+        }
+        printNetworkMenu();
+      }
+      
+      else if(flag_button2){
+        flag_button2 = false;
+        
+        if(menuNetworkRowCursor == 1){
+          if(!myNetwork.enable){
+            // Save new settings
+            setNetworkSettingsToEEPROM();
+            // Reset context
+            menuNetworkRowCursor = 1;
+            menuNetworkColCursor = 14;
+            lcd.noBlink();
+            lcd.clear();
+            // Set new state
+            mainState = MENU;
+            printMenu();
+            break;
+          }
+          menuNetworkRowCursor = 2;
+          menuNetworkColCursor = 3;
+        }
+        else if(menuNetworkRowCursor == 2){
+          if(++menuNetworkColCursor == 20){
+            menuNetworkRowCursor = 3;
+            menuNetworkColCursor = 2;
+          }
+        }
+        else if(menuNetworkRowCursor == 3){
+          if(++menuNetworkColCursor == 20){
+            // Save new settings
+            setNetworkSettingsToEEPROM();
+            // Reset context
+            menuNetworkRowCursor = 1;
+            menuNetworkColCursor = 14;
+            lcd.noBlink();
+            lcd.clear();
+            // Set new state
+            mainState = MENU;
+            printMenu();
+            break;
+          }
+        }
+        printNetworkMenu();
+      }
+      
+      else if(flag_button3){
+        flag_button3 = false;
+        if(menuNetworkRowCursor == 1){
+          myNetwork.enable = !myNetwork.enable;
+        }
+        else if(menuNetworkRowCursor == 2){
+          if(++myNetwork.accesspoint[menuNetworkColCursor-3] >= 0x80) myNetwork.accesspoint[menuNetworkColCursor-3] = 0x20; // Discard useless characters
+        }
+        else if(menuNetworkRowCursor == 3){
+          if(++myNetwork.key[menuNetworkColCursor-2] >= 0x80) myNetwork.key[menuNetworkColCursor-2] = 0x20; // Discard useless characters
+        }
+        printNetworkMenu();
+      }
+      break;
+    }
+    case SETTINGS:{
+      // Go HOME after N min of inactivity
+      if(inactivity_counter >= 2){
+        inactivity_counter = 0;
+        menuIndex = 0;
+        menuDisplayedIndex = 0;
+        mainState = HOME;
+        printMainPage();
+        timer.enable(timerId_sec);
+      }
+      if(flag_button1){
+        flag_button1 = false;
+        if(menuSettingsRowCursor == 1){ // Weekend mode
+          if(menuSettingsColCursor == 9){ // State selection
+            weekendMode.enable = !weekendMode.enable;
+          }
+          else if(menuSettingsColCursor == 14){ // Hour selection
+            if(--weekendMode.date.heures == 255) weekendMode.date.heures = 23;
+          }
+          else if(menuSettingsColCursor == 17){ // Minute selection
+            if(--weekendMode.date.minutes == 255) weekendMode.date.minutes = 59;
+          }
+        }
+       printSettingsMenu();
+      }
+      
+      else if(flag_button2){
+        flag_button2 = false;
+        
+        if(menuSettingsColCursor == 9){
+          if(!weekendMode.enable){
+            // Save new settings
+            setWeekendModeSettingsToEEPROM();
+            updateMeal(&next_date_s);
+            // Reset context
+            menuSettingsRowCursor = 1;
+            menuSettingsColCursor = 9;
+            lcd.noBlink();
+            lcd.clear();
+            // Set new state
+            mainState = MENU;
+            printMenu();
+            break;
+          }
+          menuSettingsColCursor = 14;
+        }
+        else if(menuSettingsColCursor == 14){
+          menuSettingsColCursor = 17;
+        }
+        else if(menuSettingsColCursor == 17){
+          // Save new settings
+          setWeekendModeSettingsToEEPROM();
+          // Reset context
+          menuSettingsRowCursor = 1;
+          menuSettingsColCursor = 9;
+          lcd.noBlink();
+          lcd.clear();
+          // Set new state
+          mainState = MENU;
+          printMenu();
+          break;
+        }
+        printSettingsMenu();
+      }
+      
+      else if(flag_button3){
+        flag_button3 = false;
+        if(menuSettingsRowCursor == 1){ // Weekend mode
+          if(menuSettingsColCursor == 9){ // State selection
+            weekendMode.enable = !weekendMode.enable;
+          }
+          else if(menuSettingsColCursor == 14){ // Hour selection
+            if(++weekendMode.date.heures == 24) weekendMode.date.heures = 0;
+          }
+          else if(menuSettingsColCursor == 17){ // Minute selection
+            if(++weekendMode.date.minutes == 60) weekendMode.date.minutes = 0;
+          }
+        }
+        printSettingsMenu();
+      }
+      break;
+    }
   }
-
+  
   timer.run();
 }
 
-void updateMeals(Date_s* date_s){
-  // State setup
-  for(int i = 0 ; i < nb_meals ; i++){
-    if(60*date_s->date.heures+date_s->date.minutes >= 60*date2feed[i].date.heures + date2feed[i].date.minutes){ // Meal is past
-      date2feed[i].state = 1; // Served !
-      timeleft = 0;
+void updateMeal(Date_s* date_s){
+  Date_s date2feed_masked[6]; // Array with meal time masked by week end minimal time (if needed)
+  Date_s first_meal;
+  bool masked = false;
+  int masked_meal_index = -1;
+  bool no_meal = true;
+
+  // If weekend mode is enabled, determine if meals must be masked or not
+  if(weekendMode.enable){
+    if(((date_t.jourDeLaSemaine == 5) && ((60*date_t.heures+date_t.minutes) > (60*weekendMode.date.heures+weekendMode.date.minutes))) || // Friday after weekend minimal time
+      (date_t.jourDeLaSemaine == 6) || // Saturday
+      ((date_t.jourDeLaSemaine == 7) && ((60*date_t.heures+date_t.minutes) < (60*weekendMode.date.heures+weekendMode.date.minutes)))){ // Sunday before weekend minimal time
+        masked = true;
     }
-    else{
-      date2feed[i].state = 0;
-      timeleft = (date2feed[i].date.heures - date_t.heures)*60 + (date2feed[i].date.minutes - date_t.minutes);
-      *date_s = date2feed[i]; // For next time
+  }
+
+  // Fill the meal array with masked meals (or not)
+  for(int i = 0 ; i < SIZEOFARRAY(date2feed_masked) ; i++){
+    date2feed_masked[i] = date2feed[i];
+    // If meals must be masked, set all meals before minimal time to minimal time
+    if(masked && (60*date2feed_masked[i].date.heures+date2feed_masked[i].date.minutes) < (60*weekendMode.date.heures+weekendMode.date.minutes)){
+      // If no meal already masked
+      if(masked_meal_index == -1){
+        date2feed_masked[i].date.heures = weekendMode.date.heures;
+        date2feed_masked[i].date.minutes = weekendMode.date.minutes;
+        masked_meal_index = i;
+      }
+      // Else, remove the meal and add its nbrev to the already masked meal
+      else{
+        date2feed_masked[masked_meal_index].nbrev += date2feed_masked[i].nbrev;
+        date2feed_masked[i].nbrev = 0;
+        if(date2feed_masked[masked_meal_index].nbrev > 9)
+          date2feed_masked[masked_meal_index].nbrev = 9;
+      }
+    }
+  }
+
+  // Initialise first_meal value and detect if no meal is activaed
+  for(int i = 0 ; i < SIZEOFARRAY(date2feed_masked) ; i++){
+    if(date2feed_masked[i].nbrev != 0){
+      first_meal = date2feed_masked[i];
+      no_meal = false;
       break;
     }
   }
 
-  // If all meal are served, then reload all of them and set next meal as breakfast
-  if (timeleft == 0){
-    for(int i = 0 ; i < nb_meals ; i++){
-       date2feed[i].state = 0; // Non-served !
+  // TODO Manage situation where no meal is activated
+  if(no_meal){
+    return;
+  }
+  
+  // Get the next meal
+  timeleft = 24*60; // By default (the max value)
+  short timeleft_temp;
+  for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){ 
+    if((date2feed_masked[i].nbrev == 0) || // Meal is not activated, discard it
+      (60*date_t.heures+date_t.minutes > 60*date2feed_masked[i].date.heures + date2feed_masked[i].date.minutes)) // Meal is past
+      continue;
+    else{ // Meal is later in the day
+      timeleft_temp = (date2feed_masked[i].date.heures - date_t.heures)*60 + (date2feed_masked[i].date.minutes - date_t.minutes);
+      // If flag_feed is already set and timeleft is zero, discard the corresponding meal
+      if(flag_feed && (timeleft_temp == 0)) continue;
+      else if(timeleft_temp < timeleft){
+        timeleft = timeleft_temp;
+        *date_s = date2feed_masked[i];
+      }
     }
-    timeleft = (24 - date_t.heures + date2feed[0].date.heures)*60 + (0 - date_t.minutes + date2feed[0].date.minutes);
+  }
+  
+  // If all meal are served, set next meal as first_meal
+  if (timeleft == 24*60){
+    // Found the first meal of the day
+    for(int i = 0 ; i < SIZEOFARRAY(date2feed_masked) ; i++){
+      if(date2feed_masked[i].nbrev == 0) // Meal is not activated, discard it
+        continue;
+      else if(60*date2feed_masked[i].date.heures + date2feed_masked[i].date.minutes < 60*first_meal.date.heures + first_meal.date.minutes){
+        first_meal = date2feed_masked[i];
+      }
+    }
+    *date_s = first_meal;
+    timeleft = (24 - date_t.heures + date_s->date.heures)*60 + (0 - date_t.minutes + date_s->date.minutes);
     if (timeleft > 12*60) timeleft = 12*60;
-    *date_s = date2feed[0];
+  }
+
+  // Ask for a feed if timeleft is 0
+  if(!flag_feed && (timeleft <= 0)){
+    // Ask for feed
+    flag_feed = true;
   }
 }
 
-void ISR_feed(void){
-  if(digitalRead(buttonPin) == 0){
+bool updateReservoirStatus(void){
+  return (digitalRead(receivIRPin) == 0);
+}
+
+void ISR_button1(void){
+  if(digitalRead(button1) == 0){
     delay(100);
-    if(digitalRead(buttonPin) == 0) flag_feed_force = true;
+    if(digitalRead(button1) == 0) flag_button1 = true;
+  }
+}
+
+void ISR_button2(void){
+  if(digitalRead(button2) == 0){
+    delay(100);
+    if(digitalRead(button2) == 0) flag_button2 = true;
+  }
+}
+
+void ISR_button3(void){
+  if(digitalRead(button3) == 0){
+    delay(100);
+    if(digitalRead(button3) == 0) flag_button3 = true;
   }
 }
 
 /* ISR_time is called every 1 min */
 void ISR_time(void){
-  // Decrementes time left
-  timeleft--;
-  if(timeleft <= 0){
-    // Ask for feed
-    flag_feed = true;
-  }
-  // Update Time
-  readFromRTC(&date_t);
-
-  // Print on display
-#ifdef LCD
-  printMainPage();
-#endif
-  return;
+  flag_time = true;
 }
 
 void ISR_sec(void){
-#ifdef LCD
+  // Blink colon
   blinkColon();
-#endif
+
+  // Blink LED if reservoir is empty
+  if(reservoir_empty){
+    digitalWrite(ledPin, !digitalRead(ledPin));
+  }
+  else{
+    digitalWrite(ledPin, LOW);
+  }
 }
 
 void feedTheCat(const short revolutions){
 #ifdef SERVO
-   // Attach the servo to pin 9
-  myservo.attach(9);
+   // Attach the servo to pin
+  myservo.attach(servoPin);
   // First turn backward to avoid jamming
   myservo.write(85);
   delay(500);
@@ -291,28 +837,43 @@ void feedTheCat(const short revolutions){
 /******************************************************************************
  *                              WIFI FUNCTIONS                                *
  ******************************************************************************/
-short connect2Wifi(bool reset){
-#ifdef LCD
+void startESP(){
+  // In case of a Arduino reboot, ESP is already set to 9600 baups
+  ESP8266.begin(9600);
+  envoieAuESP8266("AT+RST");
+  recoitDuESP8266(2000L, -1);
+  
+  // Reboot in 115200 baups if ESP has been rebooted
+  ESP8266.begin(115200);
+  envoieAuESP8266("AT+RST");
+  recoitDuESP8266(2000L, -1);
+
+  envoieAuESP8266("AT+UART_CUR=9600,8,1,0,0");
+  ESP8266.begin(9600);
+  recoitDuESP8266(2000L, -1);
+  
+  envoieAuESP8266("AT");
+  recoitDuESP8266(2000L, -1);
+}
+
+bool connect2Wifi(){
   lcd.clear();
   lcd.setCursor(8,1);
   lcd.print("WIFI");
   lcd.setCursor(4,2);
   lcd.print("CONNECTION...");
-#endif
 
   bool state = false;
-  if(reset) envoieAuESP8266("AT+RST");
-  else envoieAuESP8266("AT");
-  bool res = recoitDuESP8266(2000L, -1);
   envoieAuESP8266("AT+CWMODE=1"); // WIFI MODE STATION
-  res = recoitDuESP8266(5000L, -1);
-  envoieAuESP8266("AT+CWJAP=\"" + String(NomduReseauWifi) + "\",\"" + String(MotDePasse) + "\""); // JOIN ACCESS POINT
-  res = recoitDuESP8266(7000L, -1);
+  recoitDuESP8266(5000L, -1);
+  String ap = myNetwork.accesspoint;
+  String key = myNetwork.key;
+  envoieAuESP8266("AT+CWJAP=\"" + ap + "\",\"" + key + "\""); // JOIN ACCESS POINT
+  recoitDuESP8266(7000L, -1);
   state = checkWiFi();
   envoieAuESP8266("AT+CIPMUX=0");
-  res = recoitDuESP8266(2000L, -1);
+  recoitDuESP8266(2000L, -1);
 
-#ifdef LCD
   lcd.clear();
   lcd.setCursor(2,1);
   lcd.print("WIFI CONNECTION");
@@ -324,7 +885,6 @@ short connect2Wifi(bool reset){
       lcd.setCursor(7,2);
       lcd.print("FAILED");
   }
-#endif
 
   return state;
 }
@@ -339,81 +899,147 @@ void envoieAuESP8266(String commande){
   ESP8266.println(commande);
 }
 
-bool recoitDuESP8266(const long int timeout, char start_char){
+bool recoitDuESP8266(const long int timeout, char searched_char){
   char c;
-  char i = 0;
-  bool bufferize = false;
+  bool char_found = false;
   
-  if(start_char == 0) bufferize = true;
+  if(searched_char == -1) searched_char = true;
   
   long int t_start = millis();
   while ((t_start + timeout) > millis())
   {
     if(ESP8266.available()>0){
       c = ESP8266.read();
-      if(c == start_char){
-        bufferize = true;
-        i = 0;
-        DEBUG_PRINT(">>");
+      if(c == searched_char){
+        char_found = true;
       }
       DEBUG_PRINT(c);
-      if(bufferize){
-        buffer_array[i] = c;
-        i++;
-        if(i == MAX_CONTENT_SIZE){
-          DEBUG_PRINTLN("RX buffer is full");
-          break;
+    }
+  }
+  return char_found;
+}
+
+bool recoitDateEtHeureDuESP8266(const long int timeout, String &datetime, String &dayOfWeek){
+  char c;
+
+  char key_datetime[] = "datetime: ";
+  char key_datetime_i = 0;
+  bool datetime_locked = false;
+  bool datetime_found = false;
+
+  char key_dayOfWeek[] = "day_of_week: ";
+  char key_dayOfWeek_i = 0;
+  bool dayOfWeek_locked = false;
+  bool dayOfWeek_found = false;
+  
+  long int t_start = millis();
+  while (((t_start + timeout) > millis()) && (!datetime_found || !dayOfWeek_found))
+  {
+    if(ESP8266.available()>0){
+      c = ESP8266.read();
+      DEBUG_PRINT(c);
+      
+      // Search for datetime
+      if(!datetime_found){ //Search only first occurrence
+        if(c == key_datetime[key_datetime_i]){ // Search for the keyword
+          if(key_datetime_i == 9){
+            // end of keyword found
+            datetime_locked = true;
+          }
+          else key_datetime_i++;
+        }
+        else if (!datetime_locked){ // Reset pointer on keyword if keyword does not match
+          key_datetime_i = 0;
+        }
+        else{ // Get all characters of interest until the last one
+          if(c == '.'){
+            datetime_locked = false;
+            datetime_found = true;
+          }
+          else{
+            datetime += c;
+          }
+        }
+      }
+
+      // Search for day of week
+      if(!dayOfWeek_found){ //Search only first occurrence
+        if(c == key_dayOfWeek[key_dayOfWeek_i]){
+          if(key_dayOfWeek_i == 12){
+            // end of keyword found
+            dayOfWeek_locked = true;
+          }
+          else key_dayOfWeek_i++;
+        }
+        else if (!dayOfWeek_locked){ // Reset pointer on keyword if keyword does not match
+          key_dayOfWeek_i = 0;
+        }
+        else{ // Get all characters of interest until the last one
+          if(c == '\n'){
+            dayOfWeek_locked = false;
+            dayOfWeek_found = true;
+          }
+          else{
+            dayOfWeek += c;
+          }
         }
       }
     }
   }
-  return bufferize;
+  
+  return (dayOfWeek_found && datetime_found);
 }
 
-short getNetworkTime(Date* date){
-#ifdef LCD
+
+bool getNetworkTime(Date* date){
   lcd.clear();
   lcd.setCursor(1,1);
   lcd.print("TIME & DATE UPDATE");
-#endif
+
+  // Start session
+  String cmd = "AT+CIPSTART=\"TCP\",\"";
+  cmd += "worldtimeapi.org";
+  cmd += "\",";
+  cmd += "80";
+  ESP8266.println(cmd);
+  recoitDuESP8266(2000L, -1);
+
+  // Send request
   String request = "GET ";
-  request += GETtime; // Get settings
+  request += "/api/ip.txt"; // Get settings
   request += HTTP;
-  // Send request. Exit if failed
-  bool res = sendRequest(request, true);
+  String cmd_send = "AT+CIPSEND=";
+  cmd_send += String(request.length() + 2);
+  ESP8266.println(cmd_send);
+  delay(2000);
+  recoitDuESP8266(2000L, -1);
+
+  String datetime_str = "";
+  String dayOfWeek_str = "";
+  ESP8266.println(request);
+  bool res = recoitDateEtHeureDuESP8266(15000L, datetime_str, dayOfWeek_str);
   
   if(res){
-    DEBUG_PRINTLN("JSON received");
-    StaticJsonDocument<100> jsonBuffer;
-    // Get json object
-    auto error = deserializeJson(jsonBuffer, buffer_array);
-    if (error) {
-      DEBUG_PRINTLN("Time: Parsing JSON failed");
-      res = false;
+    char date_array[20];
+    short annee, mois, jour, heures, minutes, secondes = 0;
+    datetime_str.toCharArray(date_array, 20);
+    int nb_assignments = sscanf(date_array, "%d-%d-%dT%d:%d:%d", &annee, &mois, &jour, &heures, &minutes, &secondes);
+    
+    if(nb_assignments == 6){
+      date->annee = annee%100;
+      date->mois = mois;
+      date->jour = jour;
+      date->heures = heures;
+      date->minutes = minutes;
+      date->secondes = secondes;
+      date->jourDeLaSemaine = dayOfWeek_str[0] - '0';
     }
     else{
-      DEBUG_PRINTLN("Time : Parsing JSON succeeded");
-      // Get informations
-      date->secondes = jsonBuffer["s"];
-      date->minutes = jsonBuffer["mi"];
-      date->heures = jsonBuffer["h"]; // GMT + 2
-      if(jsonBuffer["js"]==0) date->jourDeLaSemaine = 7; // 0 is sunday, 6 is saturday
-      else date->jourDeLaSemaine = jsonBuffer["js"];
-      date->jour = jsonBuffer["j"];
-      date->mois= jsonBuffer["mo"];
-      date->annee = jsonBuffer["y"];
-  
-      // No need to close the session, already done
-      res = true;
+      res = false;
     }
-  }  
-  else{
-    DEBUG_PRINTLN("JSON not received.");
-    res = false;
   }
 
-#ifdef LCD
-  if(res){ // Read from Raspberry Pi
+  if(res){
     lcd.setCursor(5,2);
     lcd.print("SUCCEEDED");
   }
@@ -421,141 +1047,45 @@ short getNetworkTime(Date* date){
     lcd.setCursor(7,2);
     lcd.print("FAILED");
   }
-#endif
 
-  return res;
-}
-
-bool log2PI(String msg){
-  String request = "GET ";
-  request += GETlog; // Get settings
-  request += msg;
-  request += HTTP;
-  
-  // Send request. Exit if failed
-  bool res = sendRequest(request, false);
-
-  // Answer treatment
-  /*if(response.indexOf("OK") == -1){
-    DEBUG_PRINTLN("Log sending failed");
-    return false;
-  }
-  DEBUG_PRINTLN("Log successfully sent");*/
-
-  // No need to close the session, already done
-  return true;
-}
-
-bool getScheduleFromRaspberry(void){
-#ifdef LCD
-  lcd.clear();
-  lcd.setCursor(2,1);
-  lcd.print("SCHEDULE UPDATE");
-#endif
-
-  String request = "GET ";
-  request += GETschedule; // Get settings
-  request += HTTP;
-  // Send request. Exit if failed
-  bool res = sendRequest(request, true);
-
-  if(res){
-    DEBUG_PRINTLN("JSON received");
-    StaticJsonDocument<100> jsonBuffer;
-    // Get json object
-    auto error = deserializeJson(jsonBuffer, buffer_array);
-    if (error) {
-      DEBUG_PRINTLN("Schedule: Parsing JSON failed");
-      res=false;
-    }
-    else{
-      DEBUG_PRINTLN("Schedule : Parsing JSON succeeded");
-        
-      // Get informations
-      nb_meals = jsonBuffer["nb"];
-      for(char i =0;i<nb_meals;i++){
-        const char* repas = jsonBuffer["r"+String(i+1)];
-        date2feed[i].date.heures = (String(repas).substring(0,String(repas).indexOf(':'))).toInt();
-        date2feed[i].date.minutes = (String(repas).substring(String(repas).indexOf(':')+1,String(repas).indexOf(','))).toInt();
-        date2feed[i].nbrev = (String(repas).substring(String(repas).indexOf(',')+1)).toInt();
-      }
-      
-      // No need to close the session, already done
-      res = true;
-    }
-  }
-  else{
-    DEBUG_PRINTLN("JSON not received.");
-    res = false;
-  }
-
-#ifdef LCD
-    if(res){ // Read from Raspberry Pi
-      lcd.setCursor(5,2);
-      lcd.print("SUCCEEDED");
-    }
-    else{
-      lcd.setCursor(7,2);
-      lcd.print("FAILED");
-      }
-#endif
-
-  return res;
-}
-
-bool sendRequest(String request, bool waitForJSON){
-  bool res = false;
-  // Start session
-  String cmd = "AT+CIPSTART=\"TCP\",\"";
-  cmd += IPraspberry;
-  cmd += "\",";
-  cmd += PORTraspberry;
-  ESP8266.println(cmd);
-  res = recoitDuESP8266(2000L, -1);
-  
-  String cmd_send = "AT+CIPSEND=";
-  cmd_send += String(request.length() + 2);
-  ESP8266.println(cmd_send);
-  delay(2000);
-  res = recoitDuESP8266(2000L, -1);
-
-  ESP8266.println(request);
-  if(waitForJSON) res = recoitDuESP8266(5000L, '{');
-  else res = recoitDuESP8266(5000L, -1);
-  
   return res;
 }
 /******************************************************************************
  *                              LCD FUNCTIONS                                 *
  ******************************************************************************/
-#ifdef LCD
-void printDateAndHour(Date *date) {
-  lcd.setCursor(0, 0); // Place le curseur à (0,0)
+void printDate(Date *date, char row, char col_0) {
+  lcd.setCursor(col_0, row);
+  lcd.print(days_short[date->jourDeLaSemaine]); // 2 lettres
+  lcd.setCursor(col_0+2, row);
+  lcd.print("-");
+  lcd.setCursor(col_0+3, row); // Place le curseur à (0,0)
   lcd.print(date->jour / 10, DEC);// Affichage du jour sur deux caractéres
-  lcd.setCursor(1, 0);
+  lcd.setCursor(col_0+4, row);
   lcd.print(date->jour % 10, DEC);
-  lcd.setCursor(2, 0);
+  lcd.setCursor(col_0+5, row);
   lcd.print("/");
-  lcd.setCursor(3, 0);
+  lcd.setCursor(col_0+6, row);
   lcd.print(date->mois / 10, DEC);// Affichage du mois sur deux caractéres
-  lcd.setCursor(4, 0);
+  lcd.setCursor(col_0+7, row);
   lcd.print(date->mois % 10, DEC);
-  lcd.setCursor(5, 0);
+  lcd.setCursor(col_0+8, row);
   lcd.print("/");
-  lcd.setCursor(6, 0);
+  lcd.setCursor(col_0+9, row);
   lcd.print(date->annee / 10, DEC);// Affichage de l'année sur deux caractéres
-  lcd.setCursor(7, 0);
+  lcd.setCursor(col_0+10, row);
   lcd.print(date->annee % 10, DEC);
-  
-  lcd.setCursor(15, 0);
+}
+
+void printTime(Date *date, char row, char col_0) {
+  lcd.setCursor(col_0, row);
   lcd.print(date->heures / 10, DEC); // Affichage de l'heure sur deux caractéres
-  lcd.setCursor(16, 0);
+  lcd.setCursor(col_0+1, row);
   lcd.print(date->heures % 10, DEC);
-  lcd.setCursor(17, 0);
+  lcd.setCursor(col_0+2, row);
   lcd.print(":");
-  lcd.setCursor(18, 0);
+  lcd.setCursor(col_0+3, row);
   lcd.print(date->minutes / 10, DEC); // Affichage des minutes sur deux caractéres
-  lcd.setCursor(19, 0);
+  lcd.setCursor(col_0+4, row);
   lcd.print(date->minutes % 10, DEC);
 }
 
@@ -576,37 +1106,175 @@ void blinkColon(void){
 }
 
 void printWifiState(short state){
-  lcd.setCursor(10,0);
-  if(state ==1){
-    lcd.print("WF");
+  lcd.setCursor(16,1);
+  if(state == 1){
+    lcd.printByte(2);
   }
   else{
-    lcd.print("__");
+    lcd.print("x");
   }
 }
 
 void printTimeLeft(void){
-  lcd.setCursor(1,2);
-  lcd.print("Next meal in:");
-  lcd.setCursor(15, 2);
+  lcd.setCursor(3,2);
+  lcd.print(next_date_s.nbrev, DEC); // Affichage nombre de tours < 9
+  lcd.setCursor(4,2);
+  lcd.print(" P. in ");
+  lcd.setCursor(11,2);
   lcd.print((timeleft/60) / 10, DEC); // Affichage de l'heure sur deux caractéres
-  lcd.setCursor(16, 2);
+  lcd.setCursor(12,2);
   lcd.print((timeleft/60) % 10, DEC);
-  lcd.setCursor(17, 2);
+  lcd.setCursor(13,2);
   lcd.print(":");
-  lcd.setCursor(18, 2);
+  lcd.setCursor(14,2);
   lcd.print((timeleft % 60) / 10, DEC); // Affichage des minutes sur deux caractéres
-  lcd.setCursor(19, 2);
+  lcd.setCursor(15,2);
   lcd.print((timeleft % 60) % 10, DEC);
 }
 
 void printMainPage(){
   lcd.clear();
-  printDateAndHour(&date_t);
+  printDate(&date_t, 0, 0);
+  printTime(&date_t, 0, 15);
   printTimeLeft();
-  printWifiState(wifiState);
+  if(myNetwork.enable)
+    printWifiState(myNetwork.state);
 }
-#endif
+
+void printMenu(){
+  lcd.clear();
+  lcd.home();
+  lcd.print("------- MENU -------");
+  char row_index = 1;
+  for(int i = menuDisplayedIndex ; i < SIZEOFARRAY(menuItems) ; i++){
+     if(menuIndex == i){
+        lcd.setCursor((20 - (menuItems[i].length()-1))/2 - 2, row_index);
+        lcd.print("> ");
+        lcd.print(menuItems[i]);
+        lcd.print(" <");
+     }
+     else{
+        lcd.setCursor((20 - (menuItems[i].length()-1))/2, row_index);
+        lcd.print(menuItems[i]);
+     }
+     if(++row_index > 3) break;
+  }
+  // Print up and down char
+  if(menuDisplayedIndex > 0){
+    lcd.setCursor(0, 1);
+    lcd.printByte(0);
+  }
+  if(SIZEOFARRAY(menuItems) - menuDisplayedIndex > 3){
+    lcd.setCursor(0, 3);
+    lcd.printByte(1);
+  }
+}
+
+void printDateTimeMenu(Date *date){
+  lcd.home();
+  lcd.print("---- DATE & TIME ---");
+  printDate(date, 2, 0);
+  printTime(date, 2, 15);
+  lcd.setCursor(menuTimeSettingsIndex, 2);
+}
+
+void printMealsMenu(){
+  lcd.home();
+  lcd.print("------- MEALS ------");
+  char row_index = 1;
+  char col_index = 0;
+
+  for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){
+    lcd.setCursor(col_index+1, row_index);
+    lcd.print(date2feed[i].date.heures / 10, DEC); // Affichage de l'heure sur deux caractéres
+    lcd.setCursor(col_index+2, row_index);
+    lcd.print(date2feed[i].date.heures % 10, DEC);
+    lcd.setCursor(col_index+3, row_index);
+    lcd.print(":");
+    lcd.setCursor(col_index+4, row_index);
+    lcd.print(date2feed[i].date.minutes / 10, DEC); // Affichage des minutes sur deux caractéres
+    lcd.setCursor(col_index+5, row_index);
+    lcd.print(date2feed[i].date.minutes % 10, DEC);
+    lcd.setCursor(col_index+6, row_index);
+    lcd.print("[");
+    lcd.setCursor(col_index+7, row_index);
+    lcd.print(date2feed[i].nbrev, DEC); // Affichage du nb de revolutions
+    lcd.setCursor(col_index+8, row_index);
+    lcd.print("]");
+
+    if(i%2 == 0){
+      col_index += 10;
+    }
+    else{
+      col_index = 0;
+      row_index++;
+    }
+  }
+  
+  lcd.setCursor((menuMealsIndex%2)*10+menuMealsCursor, 1+(menuMealsIndex/2));
+}
+
+void printNetworkMenu(){
+  lcd.home();
+  lcd.print("------ NETWORK -----");
+  lcd.setCursor(0,1);
+  lcd.print("WIFI STATE:");
+  lcd.setCursor(14,1);
+  if(myNetwork.enable){
+    char curs = 3;
+    lcd.print("ON ");
+    lcd.setCursor(0,2);
+    lcd.print("AP:");
+    for(int i = 0 ; i < SIZEOFARRAY(myNetwork.accesspoint); i++){
+      lcd.setCursor(curs++, 2);
+      lcd.printByte(myNetwork.accesspoint[i]);
+    }
+    lcd.setCursor(0,3);
+    lcd.print("K:");
+    curs = 2;
+    for(int i = 0 ; i < SIZEOFARRAY(myNetwork.key); i++){
+      lcd.setCursor(curs++, 3);
+      lcd.printByte(myNetwork.key[i]);
+    }
+  }
+  else{
+    lcd.print("OFF");
+    lcd.setCursor(0,2);
+    lcd.print("                    ");
+    lcd.setCursor(0,3);
+    lcd.print("                    ");
+  }
+  
+  lcd.setCursor(menuNetworkColCursor, menuNetworkRowCursor);
+}
+
+void printSettingsMenu(){
+  lcd.home();
+  lcd.print("----- SETTINGS -----");
+  lcd.setCursor(0,1);
+  lcd.print("WE MODE:");
+  lcd.setCursor(9,1);
+  if(weekendMode.enable){
+    lcd.print("ON ");
+    // Print minimal time
+    char curs = 13;
+    lcd.setCursor(curs,1);
+    lcd.print(weekendMode.date.heures / 10, DEC); // Affichage de l'heure sur deux caractéres
+    lcd.setCursor(curs+1, 1);
+    lcd.print(weekendMode.date.heures % 10, DEC);
+    lcd.setCursor(curs+2, 1);
+    lcd.print(":");
+    lcd.setCursor(curs+3, 1);
+    lcd.print(weekendMode.date.minutes / 10, DEC); // Affichage des minutes sur deux caractéres
+    lcd.setCursor(curs+4, 1);
+    lcd.print(weekendMode.date.minutes % 10, DEC);
+  }
+  else{
+    lcd.print("OFF      ");
+  }
+  
+  lcd.setCursor(menuSettingsColCursor, menuSettingsRowCursor);
+}
 /******************************************************************************
  *                              RTC FUNCTIONS                                 *
  ******************************************************************************/
@@ -649,4 +1317,117 @@ byte bcd2dec(byte bcd) {
  
 byte dec2bcd(byte dec) {
   return ((dec / 10 * 16) + (dec % 10));
+}
+
+/******************************************************************************
+ *                              EEPROM FUNCTIONS                              *
+ ******************************************************************************/
+void getMealsFromEEPROM(void){
+  int value = 0;
+  int address = 0;
+  
+  // Read first address to determine if EEPROM has already be written to
+  value = EEPROM.read(address);
+  if(value != -1){ // EEPROM has already be written
+    for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){
+      date2feed[i].date.heures = EEPROM.read(address++);
+      date2feed[i].date.minutes = EEPROM.read(address++);
+      date2feed[i].nbrev = EEPROM.read(address++);
+    }
+  }
+  else{ // EEPROM never modified
+    // Default setup (4 meals)
+    date2feed[0].date.heures = 7;
+    date2feed[0].date.minutes = 0;
+    date2feed[0].nbrev = 2;
+    date2feed[1].date.heures = 12;
+    date2feed[1].date.minutes = 0;
+    date2feed[1].nbrev = 1;
+    date2feed[2].date.heures = 17;
+    date2feed[2].date.minutes = 0;
+    date2feed[2].nbrev = 1;
+    date2feed[3].date.heures = 21;
+    date2feed[3].date.minutes = 0;
+    date2feed[3].nbrev = 2;
+
+    setMealsToEEPROM();
+  }
+}
+
+void setMealsToEEPROM(void){
+  int address = 0;
+  for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){
+    EEPROM.update(address++, date2feed[i].date.heures);
+    EEPROM.update(address++, date2feed[i].date.minutes);
+    EEPROM.update(address++, date2feed[i].nbrev);
+  }
+}
+
+void getNetworkSettingsFromEEPROM(void){
+  int address = 18;
+  // Enable
+  char enable = EEPROM.read(address);
+  if((enable == 0) || (enable == -1)){
+    myNetwork.enable = false;
+  }
+  else{
+    myNetwork.enable = true;
+  }
+  // Accespoint and key (from 19 to 54)
+  address = 19;
+  for(int i = 0 ; i < SIZEOFARRAY(myNetwork.accesspoint); i++){
+    myNetwork.accesspoint[i] = EEPROM.read(address++);
+    if(myNetwork.accesspoint[i] >= 0x80) myNetwork.accesspoint[i] = 0x20; // Discard useless characters
+  }
+  for(int i = 0 ; i < SIZEOFARRAY(myNetwork.key); i++){
+    myNetwork.key[i] = EEPROM.read(address++);
+    if(myNetwork.key[i] >= 0x80) myNetwork.key[i] = 0x20; // Discard useless characters
+  }
+}
+
+void setNetworkSettingsToEEPROM(void){
+  int address = 18;
+  // Enable
+  EEPROM.update(address++, (myNetwork.enable ? 1 : 0));
+  // Accespoint and key
+  for(int i = 0 ; i < SIZEOFARRAY(myNetwork.accesspoint); i++){
+     EEPROM.update(address++, myNetwork.accesspoint[i]);
+  }
+  for(int i = 0 ; i < SIZEOFARRAY(myNetwork.key); i++){
+     EEPROM.update(address++, myNetwork.key[i]);
+  }
+}
+
+void getWeekendModeSettingsFromEEPROM(void){
+  int address = 55;
+  // Enable
+  char enable = EEPROM.read(address);
+  if((enable == 0) || (enable == -1)){
+   weekendMode.enable = false;
+  }
+  else{
+    weekendMode.enable = true;
+  }
+  
+  address = 56;
+  if(enable != -1){ // EEPROM has already be written
+    weekendMode.date.heures = EEPROM.read(address++);
+    weekendMode.date.minutes = EEPROM.read(address++);
+  }
+  else{ // EEPROM never modified
+    // Default setup (09:00)
+    weekendMode.date.heures = 9;
+    weekendMode.date.minutes = 0;
+
+    setWeekendModeSettingsToEEPROM();
+  }
+}
+
+void setWeekendModeSettingsToEEPROM(void){
+  int address = 55;
+  // Enable
+  EEPROM.update(address++, (weekendMode.enable ? 1 : 0));
+  // Time
+  EEPROM.update(address++, weekendMode.date.heures);
+  EEPROM.update(address++, weekendMode.date.minutes);
 }
