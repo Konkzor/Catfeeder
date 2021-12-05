@@ -30,12 +30,12 @@ typedef struct{
   uint8_t secondes;
   uint8_t minutes;
   uint8_t heures; // format 24h
-  uint8_t jourDeLaSemaine; // 0~6 = lundi, mardi, ... (for RTC purpose)
+  uint8_t jourDeLaSemaine; // 1~7 = monday, ...
   uint8_t jour;
   uint8_t mois; 
   uint8_t annee; // format yy (ex 2012 -> 12)
 }Date;
-String days_short[7] = {"SU", "MO", "TU", "WE", "TH", "FR", "SA"};
+String days_short[8] = {"NC", "MO", "TU", "WE", "TH", "FR", "SA", "SU"};
 
 typedef struct{
   Date date;
@@ -372,7 +372,7 @@ void loop() {
       // Down button
       if(flag_button1){
         if(menuTimeSettingsIndex == 1){
-          if(--date_t.jourDeLaSemaine == 255) date_t.jourDeLaSemaine = 6;
+          if(--date_t.jourDeLaSemaine == 255) date_t.jourDeLaSemaine = 7;
         }
         else if(menuTimeSettingsIndex == 4){
           if(--date_t.jour == 0) date_t.jour = 31;
@@ -420,7 +420,7 @@ void loop() {
       // Up button
       else if(flag_button3){
         if(menuTimeSettingsIndex == 1){
-          if(++date_t.jourDeLaSemaine == 7) date_t.jourDeLaSemaine = 0;
+          if(++date_t.jourDeLaSemaine == 8) date_t.jourDeLaSemaine = 1;
         }
         else if(menuTimeSettingsIndex == 4){
           if(++date_t.jour == 32) date_t.jour = 1;
@@ -1032,7 +1032,10 @@ bool getNetworkTime(Date* date){
       date->heures = heures;
       date->minutes = minutes;
       date->secondes = secondes;
-      date->jourDeLaSemaine = dayOfWeek_str[0] - '0';
+      if(dayOfWeek_str[0] == '0'){ //dayOfWeek_str[0] = 0 on Sunday, 1 on Monday, etc.
+        date->jourDeLaSemaine = 7;
+      }
+      else date->jourDeLaSemaine = dayOfWeek_str[0] - '0';
     }
     else{
       res = false;
