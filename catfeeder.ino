@@ -1,7 +1,7 @@
 #include <EEPROM.h>
 #include <Servo.h>
 #include <Wire.h>
-#include <SimpleTimer.h>
+#include <arduino-timer.h>
 #include <LiquidCrystal_I2C.h>
 #include <SoftwareSerial.h>
 
@@ -62,9 +62,9 @@ SoftwareSerial ESP8266(10, 11);
 Date_s date2feed[6];
 
 // Timer
-SimpleTimer timer;
-int timerId_time;
-int timerId_sec;
+auto timer = timer_create_default(); // create a timer with default settings
+auto timerId_time = timer.in(1, NULL);
+auto timerId_sec = timer.in(1, NULL);
 
 // IOs
 #ifdef SERVO
@@ -124,6 +124,27 @@ typedef struct{
 }WeekendMode_s;
 WeekendMode_s weekendMode;
 bool reservoir_empty = false;
+
+/* ISR_time is called every 1 min */
+bool ISR_time(void *){
+  flag_time = true;
+  return true;
+}
+
+bool ISR_sec(void *){
+  // Blink colon
+  blinkColon();
+
+  // Blink LED if reservoir is empty
+  if(reservoir_empty){
+    digitalWrite(ledPin, !digitalRead(ledPin));
+  }
+  else{
+    digitalWrite(ledPin, LOW);
+  }
+
+  return true;
+}
 
 void setup() {
   bool res = false;
@@ -185,8 +206,8 @@ void setup() {
   printMainPage();
   
   // Timer setup
-  timerId_time = timer.setInterval(60000, ISR_time); // Every 1 min
-  timerId_sec = timer.setInterval(500, ISR_sec); // Every 500ms
+  timerId_time = timer.every(60000, ISR_time); // Every 1 min
+  timerId_sec = timer.every(500, ISR_sec); // Every 500ms
 }
 
 void loop() {
@@ -241,8 +262,8 @@ void loop() {
 
       // Manage food service
       if(flag_feed){
-        timer.disable(timerId_sec);
-        //timer.disable(timerId_time);
+        timer.cancel(timerId_sec);
+        //timer.cancel(timerId_time);
         
         // Feed the cat
         printTime2Eat();
@@ -255,8 +276,8 @@ void loop() {
         updateMeal(&next_date_s);
         printMainPage();
         flag_feed = false;
-        //timer.enable(timerId_time);
-        timer.enable(timerId_sec);
+        //timerId_time = timer.every(60000, ISR_time);
+        timerId_sec = timer.every(500, ISR_sec);
       }
 
       // Transition
@@ -265,8 +286,8 @@ void loop() {
         flag_button3 = false;
       }
       if(flag_button2){
-        //timer.disable(timerId_time);
-        timer.disable(timerId_sec);
+        //timer.cancel(timerId_time);
+        timer.cancel(timerId_sec);
         
         mainState = MENU;
         lcd.clear();
@@ -284,7 +305,7 @@ void loop() {
         menuDisplayedIndex = 0;
         mainState = HOME;
         printMainPage();
-        timer.enable(timerId_sec);
+        timerId_sec = timer.every(500, ISR_sec);
       }
       // Up button
       if(flag_button1){
@@ -307,7 +328,7 @@ void loop() {
           menuDisplayedIndex = 0;
           mainState = HOME;
           printMainPage();
-          timer.enable(timerId_sec);
+          timerId_sec = timer.every(500, ISR_sec);
         }
         else{
           mainState = 2 + menuIndex;
@@ -337,7 +358,7 @@ void loop() {
               menuDisplayedIndex = 0;
               mainState = HOME;
               printMainPage();
-              timer.enable(timerId_sec);
+              timerId_sec = timer.every(500, ISR_sec);
               break;
           }
         }
@@ -367,7 +388,7 @@ void loop() {
         menuDisplayedIndex = 0;
         mainState = HOME;
         printMainPage();
-        timer.enable(timerId_sec);
+        timerId_sec = timer.every(500, ISR_sec);
       }
       // Down button
       if(flag_button1){
@@ -451,7 +472,7 @@ void loop() {
         menuDisplayedIndex = 0;
         mainState = HOME;
         printMainPage();
-        timer.enable(timerId_sec);
+        timerId_sec = timer.every(500, ISR_sec);
       }
       // Down button
       if(flag_button1){
@@ -518,7 +539,7 @@ void loop() {
         menuDisplayedIndex = 0;
         mainState = HOME;
         printMainPage();
-        timer.enable(timerId_sec);
+        timerId_sec = timer.every(500, ISR_sec);
       }
       if(flag_button1){
         flag_button1 = false;
@@ -601,7 +622,7 @@ void loop() {
         menuDisplayedIndex = 0;
         mainState = HOME;
         printMainPage();
-        timer.enable(timerId_sec);
+        timerId_sec = timer.every(500, ISR_sec);
       }
       if(flag_button1){
         flag_button1 = false;
@@ -676,8 +697,8 @@ void loop() {
       break;
     }
   }
-  
-  timer.run();
+
+  timer.tick();
 }
 
 void updateMeal(Date_s* date_s){
@@ -793,24 +814,6 @@ void ISR_button3(void){
   if(digitalRead(button3) == 0){
     delay(100);
     if(digitalRead(button3) == 0) flag_button3 = true;
-  }
-}
-
-/* ISR_time is called every 1 min */
-void ISR_time(void){
-  flag_time = true;
-}
-
-void ISR_sec(void){
-  // Blink colon
-  blinkColon();
-
-  // Blink LED if reservoir is empty
-  if(reservoir_empty){
-    digitalWrite(ledPin, !digitalRead(ledPin));
-  }
-  else{
-    digitalWrite(ledPin, LOW);
   }
 }
 
