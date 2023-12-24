@@ -126,6 +126,12 @@ typedef struct{
 WeekendMode_s weekendMode;
 bool reservoir_empty = false;
 
+#define ERROR_NONE  0
+#define ERROR_RTC   1
+#define ERROR_ESP   2
+
+char error = ERROR_NONE;
+
 /* ISR_time is called every 1 min */
 bool ISR_time(void *){
   flag_time = true;
@@ -859,9 +865,11 @@ bool startESP(){
   envoieAuESP8266("AT");
   bool res = recoitDuESP8266(2000L, 0x4B); // 'K' letter from "OK"
   if(!res){
+    error |= ERROR_ESP;
     return false;
   }
   else{
+    error &= ~ERROR_ESP;
     return true;
   }
 }
@@ -1145,6 +1153,11 @@ void printTimeLeft(void){
   lcd.print((timeleft % 60) % 10, DEC);
 }
 
+void printErrorCode(void){
+  lcd.setCursor(19,3);
+  lcd.print(error, DEC);
+}
+
 void printMainPage(){
   lcd.clear();
   printDate(&date_t, 0, 0);
@@ -1152,6 +1165,9 @@ void printMainPage(){
   printTimeLeft();
   if(myNetwork.enable)
     printWifiState(myNetwork.state);
+  if(error != 0){
+    printErrorCode();
+  }
 }
 
 void printMenu(){
@@ -1311,8 +1327,13 @@ void writeToRTC(Date *date) {
 void readFromRTC(Date *date) {
   Wire.beginTransmission(DS1307_ADDRESS); // Début de transaction I2C
   Wire.write(0); // Demande les info à partir de l'adresse 0 (soit toutes les info)
-  Wire.endTransmission(); // Fin de transaction I2C
+  char res = Wire.endTransmission(); // Fin de transaction I2C
  
+  if(res != 0){
+    error |= ERROR_RTC;
+  }
+  else{
+    error &= ~ERROR_RTC;
   Wire.requestFrom(DS1307_ADDRESS, 7); // Récupère les info (7 octets = 7 valeurs correspondant à l'heure et à la date courante)
  
   date->secondes = bcd2dec(Wire.read()); // stockage et conversion des données reçu
@@ -1322,6 +1343,7 @@ void readFromRTC(Date *date) {
   date->jour = bcd2dec(Wire.read());
   date->mois = bcd2dec(Wire.read());
   date->annee = bcd2dec(Wire.read());
+  }
 }
 
 byte bcd2dec(byte bcd) {
