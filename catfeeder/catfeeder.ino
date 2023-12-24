@@ -27,13 +27,13 @@
 #define addr_flag 0
 
 typedef struct{
-  uint8_t secondes;
-  uint8_t minutes;
-  uint8_t heures; // format 24h
-  uint8_t jourDeLaSemaine; // 1~7 = monday, ...
-  uint8_t jour;
-  uint8_t mois; 
-  uint8_t annee; // format yy (ex 2012 -> 12)
+  uint8_t secondes = 0;
+  uint8_t minutes = 0;
+  uint8_t heures = 0; // format 24h
+  uint8_t jourDeLaSemaine = 1; // 1~7 = monday, ...
+  uint8_t jour = 1;
+  uint8_t mois = 1; 
+  uint8_t annee = 0; // format yy (ex 2012 -> 12)
 }Date;
 String days_short[8] = {"NC", "MO", "TU", "WE", "TH", "FR", "SA", "SU"};
 
