@@ -47,10 +47,11 @@ typedef struct{
 
 // WIFI
 typedef struct{
-  bool enable;
+  bool ESPdetected = false;
+  bool enable = false;
   unsigned char accesspoint[17];
   unsigned char key[18];
-  char state;
+  bool state = false;
 }Network_s;
 Network_s myNetwork;
 
@@ -167,7 +168,7 @@ void setup() {
   DEBUG_PRINTLN("******** Hello Catfeeder! ********");
 #endif
 
-  startESP();
+  myNetwork.ESPdetected = startESP();
 
   // LCD setup
   lcd.init();
@@ -180,7 +181,7 @@ void setup() {
 
   // Connect to Wifi
   getNetworkSettingsFromEEPROM();
-  if(myNetwork.enable){
+  if(myNetwork.ESPdetected && myNetwork.enable){
     myNetwork.state = connect2Wifi();
     delay(2000);
   }
@@ -270,7 +271,7 @@ void loop() {
         feedTheCat(next_date_s.nbrev);
     
         // If not connected, try to reconnect
-        if(myNetwork.enable && !myNetwork.state) myNetwork.state = connect2Wifi();
+        if(myNetwork.ESPdetected && myNetwork.enable && !myNetwork.state) myNetwork.state = connect2Wifi();
 
         // Update next meal settings (time and nbrev)
         updateMeal(&next_date_s);
@@ -840,7 +841,7 @@ void feedTheCat(const short revolutions){
 /******************************************************************************
  *                              WIFI FUNCTIONS                                *
  ******************************************************************************/
-void startESP(){
+bool startESP(){
   // In case of a Arduino reboot, ESP is already set to 9600 baups
   ESP8266.begin(9600);
   envoieAuESP8266("AT+RST");
@@ -856,7 +857,13 @@ void startESP(){
   recoitDuESP8266(2000L, -1);
   
   envoieAuESP8266("AT");
-  recoitDuESP8266(2000L, -1);
+  bool res = recoitDuESP8266(2000L, 0x4B); // 'K' letter from "OK"
+  if(!res){
+    return false;
+  }
+  else{
+    return true;
+  }
 }
 
 bool connect2Wifi(){
