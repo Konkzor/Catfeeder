@@ -1334,7 +1334,7 @@ void getMealsFromEEPROM(void){
   
   // Read first address to determine if EEPROM has already be written to
   value = EEPROM.read(address);
-  if(value != -1){ // EEPROM has already be written
+  if(value != 255){ // EEPROM has already be written
     for(int i = 0 ; i < SIZEOFARRAY(date2feed) ; i++){
       date2feed[i].date.heures = EEPROM.read(address++);
       date2feed[i].date.minutes = EEPROM.read(address++);
