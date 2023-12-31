@@ -1311,20 +1311,21 @@ void printSettingsMenu(){
 // Fonction configurant le DS1307 avec la date/heure fourni
 void writeToRTC(Date *date) {
   Wire.beginTransmission(DS1307_ADDRESS); // Début de transaction I2C
-  Wire.write(0); // Arrête l'oscillateur du DS1307
-  Wire.write(dec2bcd(date->secondes)); // Envoi des données
+  Wire.write(0); // Position pointeur adresse 0
+  Wire.write(dec2bcd(date->secondes) & 127); // Secondes + CH=0 (start RTC)
   Wire.write(dec2bcd(date->minutes));
   Wire.write(dec2bcd(date->heures));
   Wire.write(dec2bcd(date->jourDeLaSemaine));
   Wire.write(dec2bcd(date->jour));
   Wire.write(dec2bcd(date->mois));
   Wire.write(dec2bcd(date->annee));
-  Wire.write(0); // Redémarre l'oscillateur du DS1307
   Wire.endTransmission(); // Fin de transaction I2C
 }
  
 // Fonction récupérant l'heure et la date courante à partir du DS1307
 void readFromRTC(Date *date) {
+  short seconds_raw = 0;
+  
   Wire.beginTransmission(DS1307_ADDRESS); // Début de transaction I2C
   Wire.write(0); // Demande les info à partir de l'adresse 0 (soit toutes les info)
   char res = Wire.endTransmission(); // Fin de transaction I2C
@@ -1335,14 +1336,40 @@ void readFromRTC(Date *date) {
   else{
     error &= ~ERROR_RTC;
   Wire.requestFrom(DS1307_ADDRESS, 7); // Récupère les info (7 octets = 7 valeurs correspondant à l'heure et à la date courante)
- 
-  date->secondes = bcd2dec(Wire.read()); // stockage et conversion des données reçu
+    seconds_raw = Wire.read();
+    date->secondes = bcd2dec(seconds_raw); // stockage et conversion des données reçu
   date->minutes = bcd2dec(Wire.read());
   date->heures = bcd2dec(Wire.read() & 0b111111);
   date->jourDeLaSemaine = bcd2dec(Wire.read());
   date->jour = bcd2dec(Wire.read());
   date->mois = bcd2dec(Wire.read());
   date->annee = bcd2dec(Wire.read());
+  }
+
+  if(seconds_raw & 128){ // RTC stopped, start it again
+    DEBUG_PRINTLN("RTC is stopped");
+    Wire.beginTransmission(DS1307_ADDRESS); // Début de transaction I2C
+    Wire.write(0); // Position pointeur adresse 0
+    Wire.write(0); // Envoi des données
+    Wire.endTransmission(); // Fin de transaction I2C
+
+    // Check RTC status again
+    Wire.beginTransmission(DS1307_ADDRESS); // Début de transaction I2C
+    Wire.write(0); // Demande les info à partir de l'adresse 0 (soit toutes les info)
+    Wire.requestFrom(DS1307_ADDRESS, 1);
+    seconds_raw = Wire.read();
+
+    if(seconds_raw & 128){
+      DEBUG_PRINTLN("RTC failed starting");
+      error |= ERROR_RTC;
+    }
+    else{
+      DEBUG_PRINTLN("RTC successfully started");
+      error &= ~ERROR_RTC;
+    }
+  }
+  else{
+    error &= ~ERROR_RTC;
   }
 }
 
